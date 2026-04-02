@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from db.engine import get_db
+from platform_registry import (
+    PlatformAgentRecord,
+    PlatformSkillRecord,
+    PlatformToolRecord,
+    get_agent_record,
+    get_registry_snapshot,
+    list_agent_records,
+    list_skill_records,
+    list_tool_records,
+    publish_agent,
+    sync_local_tools_into_registry,
+    sync_mcp_tools_into_registry,
+    upsert_agent_record,
+    upsert_skill_record,
+    upsert_tool_record,
+)
+
+router = APIRouter(prefix="/api/platform", tags=["platform"])
+
+
+@router.get("/snapshot")
+async def platform_snapshot(db: AsyncSession = Depends(get_db)):
+    return await get_registry_snapshot(db)
+
+
+@router.get("/tools")
+async def platform_tools(include_disabled: bool = False):
+    return [record.model_dump(by_alias=True) for record in list_tool_records(include_disabled=include_disabled)]
+
+
+@router.post("/tools/sync/local")
+async def sync_local_tools(db: AsyncSession = Depends(get_db)):
+    records = await sync_local_tools_into_registry(db)
+    return {"count": len(records), "tools": [record.model_dump(by_alias=True) for record in records]}
+
+
+@router.post("/tools/sync/mcp")
+async def sync_mcp_tools(db: AsyncSession = Depends(get_db)):
+    records = await sync_mcp_tools_into_registry(db, force=True)
+    return {"count": len(records), "tools": [record.model_dump(by_alias=True) for record in records]}
+
+
+@router.post("/tools")
+async def create_tool(payload: PlatformToolRecord, db: AsyncSession = Depends(get_db)):
+    record = await upsert_tool_record(db, payload)
+    return record.model_dump(by_alias=True)
+
+
+@router.put("/tools/{tool_name}")
+async def update_tool(tool_name: str, payload: PlatformToolRecord, db: AsyncSession = Depends(get_db)):
+    data = payload.model_copy(update={"tool_name": tool_name})
+    record = await upsert_tool_record(db, data)
+    return record.model_dump(by_alias=True)
+
+
+@router.get("/skills")
+async def platform_skills(include_disabled: bool = False):
+    return [record.model_dump(by_alias=True) for record in list_skill_records(include_disabled=include_disabled, scoped=False)]
+
+
+@router.post("/skills")
+async def create_skill(payload: PlatformSkillRecord, db: AsyncSession = Depends(get_db)):
+    record = await upsert_skill_record(db, payload)
+    return record.model_dump(by_alias=True)
+
+
+@router.put("/skills/{skill_name}")
+async def update_skill(skill_name: str, payload: PlatformSkillRecord, db: AsyncSession = Depends(get_db)):
+    data = payload.model_copy(update={"skill_name": skill_name})
+    record = await upsert_skill_record(db, data)
+    return record.model_dump(by_alias=True)
+
+
+@router.get("/agents")
+async def platform_agents(include_disabled: bool = False):
+    return [record.model_dump(by_alias=True) for record in list_agent_records(include_disabled=include_disabled)]
+
+
+@router.get("/agents/{agent_id}")
+async def platform_agent(agent_id: str):
+    record = get_agent_record(agent_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return record.model_dump(by_alias=True)
+
+
+@router.post("/agents")
+async def create_agent(payload: PlatformAgentRecord, db: AsyncSession = Depends(get_db)):
+    record = await upsert_agent_record(db, payload)
+    return record.model_dump(by_alias=True)
+
+
+@router.put("/agents/{agent_id}")
+async def update_agent(agent_id: str, payload: PlatformAgentRecord, db: AsyncSession = Depends(get_db)):
+    data = payload.model_copy(update={"agent_id": agent_id})
+    record = await upsert_agent_record(db, data)
+    return record.model_dump(by_alias=True)
+
+
+@router.post("/agents/{agent_id}/publish")
+async def platform_publish_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
+    record = await publish_agent(db, agent_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return record.model_dump(by_alias=True)

@@ -3,16 +3,24 @@ from framework_profile import load_framework_profile, render_long_term_memory
 
 
 def build_system(
-    extra: str = "",
+    skill_summaries: str = "",
     phone: str = "",
     agent_state: dict | None = None,
     runtime_controls: dict | None = None,
     latest_user_text: str = "",
+    system_core_prompt: str = "",
+    persona_prompt: str = "",
+    skill_guide_prompt: str = "",
+    memory_prompt: str = "",
 ) -> list[str]:
     profile = load_framework_profile()
+    resolved_system_core = str(system_core_prompt or profile.prompts.system_core).strip()
+    resolved_persona = str(persona_prompt or "").strip()
+    resolved_skill_guide = str(skill_guide_prompt or profile.prompts.skill_guide).strip()
     parts = [
-        _section("Layer 0: Service Rules", profile.prompts.system_core),
-        _section("Layer 1: Skill and Tool Guide", profile.prompts.skill_guide),
+        _section("Layer 0: Service Rules", resolved_system_core),
+        _section("Layer 0.5: Agent Persona", resolved_persona),
+        _section("Layer 1: Skill and Tool Guide", resolved_skill_guide),
         _section("Layer 2: Time Context", f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}"),
     ]
 
@@ -20,7 +28,7 @@ def build_system(
     if user_context:
         parts.append(_section("Layer 3: User Context", user_context))
 
-    memory_text = render_long_term_memory(query=latest_user_text)
+    memory_text = render_long_term_memory(query=latest_user_text, prompt_override=memory_prompt)
     if memory_text:
         parts.append(_section("Layer 4: Long-Term Memory", memory_text))
 
@@ -28,8 +36,8 @@ def build_system(
     if runtime_text:
         parts.append(_section("Layer 5: Runtime Controls", runtime_text))
 
-    if extra:
-        parts.append(_section("Layer 6: Loaded Skill Prompts", extra))
+    if skill_summaries:
+        parts.append(_section("Layer 6: Skill Summaries", skill_summaries))
     return [part for part in parts if part]
 
 

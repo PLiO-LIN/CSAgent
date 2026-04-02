@@ -111,12 +111,12 @@ export default function MessageBubble({ message, toggle, send, entityAliases }: 
   if (message.role === 'summary') {
     return (
       <div className="mb-4 flex justify-center">
-        <div className="telecom-inner-panel w-full max-w-[85%] rounded-[22px] border-[rgba(15,111,255,0.12)] bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(236,244,255,0.98))] px-4 py-3 shadow-[0_12px_28px_rgba(13,63,145,0.08)]">
-          <div className="flex items-center gap-2 text-sm font-medium text-[var(--telecom-blue-700)]">
+        <div className="studio-inner-panel w-full max-w-[85%] rounded-[22px] border-[rgba(15,111,255,0.12)] bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(236,244,255,0.98))] px-4 py-3 shadow-[0_12px_28px_rgba(13,63,145,0.08)]">
+          <div className="flex items-center gap-2 text-sm font-medium text-[var(--studio-blue-700)]">
             <Brain size={14} />
             <span>上下文已总结</span>
           </div>
-          <div className="mt-1 whitespace-pre-wrap text-xs leading-5 text-[var(--telecom-ink-700)]">
+          <div className="mt-1 whitespace-pre-wrap text-xs leading-5 text-[var(--studio-ink-700)]">
             {applyEntityAliases(message.content, entityAliases)}
           </div>
         </div>
@@ -170,16 +170,16 @@ export default function MessageBubble({ message, toggle, send, entityAliases }: 
           className="flex w-full items-center justify-between px-3 py-2.5 text-xs transition-colors hover:bg-white/50"
         >
           <span className="flex items-center gap-2">
-            {(t.status === 'calling' || t.status === 'executing') && <Loader2 size={12} className="animate-spin text-[var(--telecom-blue-500)]" />}
-            {t.status === 'done' && <CheckCircle2 size={12} className="text-[var(--telecom-blue-500)]" />}
+            {(t.status === 'calling' || t.status === 'executing') && <Loader2 size={12} className="animate-spin text-[var(--studio-blue-500)]" />}
+            {t.status === 'done' && <CheckCircle2 size={12} className="text-[var(--studio-blue-500)]" />}
             {t.status === 'error' && <XCircle size={12} className="text-rose-500" />}
             <span className="font-medium text-slate-700">{toolLabel(t.name)}</span>
           </span>
           <span className="flex items-center gap-2 text-slate-400">
             <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${
               t.status === 'error' ? 'bg-rose-100 text-rose-600'
-              : t.status === 'done' ? 'bg-[rgba(15,111,255,0.12)] text-[var(--telecom-blue-600)]'
-              : 'bg-[rgba(15,111,255,0.10)] text-[var(--telecom-blue-500)]'
+              : t.status === 'done' ? 'bg-[rgba(15,111,255,0.12)] text-[var(--studio-blue-600)]'
+              : 'bg-[rgba(15,111,255,0.10)] text-[var(--studio-blue-500)]'
             }`}>
               {t.status === 'calling' ? '调用中' : t.status === 'executing' ? '执行中' : t.status === 'done' ? '完成' : '失败'}
             </span>
@@ -217,14 +217,14 @@ export default function MessageBubble({ message, toggle, send, entityAliases }: 
           <div className="overflow-hidden rounded-[20px] border border-[rgba(15,111,255,0.10)] bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(237,245,255,0.92))]">
             <button
               onClick={() => setThinkOpen(!thinkOpen)}
-              className="flex w-full items-center gap-2 px-3 py-2 text-xs text-[var(--telecom-blue-600)] transition-colors hover:bg-white/50"
+              className="flex w-full items-center gap-2 px-3 py-2 text-xs text-[var(--studio-blue-600)] transition-colors hover:bg-white/50"
             >
               <Brain size={12} />
               <span className="font-medium">思考过程</span>
               <span className="ml-auto">{thinkOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}</span>
             </button>
             {thinkOpen && (
-              <div className="max-h-48 overflow-y-auto whitespace-pre-wrap px-3 pb-2 text-xs leading-relaxed text-[var(--telecom-ink-700)]">
+              <div className="max-h-48 overflow-y-auto whitespace-pre-wrap px-3 pb-2 text-xs leading-relaxed text-[var(--studio-ink-700)]">
                 {applyEntityAliases(message.thinking, entityAliases)}
               </div>
             )}

@@ -6,7 +6,6 @@ app:
 server:
   host: 0.0.0.0
   port: 8200
-  mock_port: 8201
   cors_origins:
     - http://127.0.0.1:3000
     - http://localhost:3000
@@ -44,34 +43,11 @@ summary:
   recent_tool_limit: 6
   max_output_tokens: 2000
 
-knowledge:
-  klg_path: ../../telecom-agent/klg.xlsx
-  klg_top_k: 5
-
-eop:
-  base_url: ""
-  token: 41777235-68c4-4931-bfd2-4a56e9167b43
-
 mcp:
   enabled: false
   tool_timeout_seconds: 60
   servers: {}
 
-legacy_bridge:
-  enabled: false
-  base_url: http://127.0.0.1:8000
-  timeout_seconds: 120
-
-plugins:
-  root_dir: ../plugins
-  enabled_ids:
-    - global.base
-    - global.knowledge
-    - telecom.query
-    - telecom.recommend
-    - telecom.order
-    - telecom.recharge
-
 notes:
   config_entry: backend/config.yaml
-  purpose: 在 CSAgent 中原生承载当前电信客服智能体能力
+  purpose: 在 CSAgent 中原生承载平台化智能体与注册中心能力

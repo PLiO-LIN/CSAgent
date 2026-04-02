@@ -27,24 +27,9 @@ function uid() {
 }
 
 const TOOL_LABELS: Record<string, string> = {
-  query_package: '用量查询',
-  query_balance: '余额/额度查询',
-  query_bill: '账单/记录查询',
-  query_user_info: '用户信息查询',
-  query_points: '积分/权益查询',
-  check_order_restrictions: '下单前校验',
-  recommend_products: '推荐方案生成',
-  compare_products: '方案对比',
-  query_orders: '订单查询',
-  preview_order: '下单预览',
-  request_order_sms_code: '验证码请求',
-  submit_order: '提交申请',
-  confirm_order_payment: '支付确认',
-  create_recharge_link: '支付链接生成',
-  preview_recharge: '支付金额预览',
-  search_knowledge: '知识检索',
   load_skills: '加载技能',
-  list_plugins: '查看插件',
+  list_tools: '查看工具',
+  list_skills: '查看技能',
 }
 
 export function toolLabel(name: string) {

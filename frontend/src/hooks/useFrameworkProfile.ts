@@ -34,27 +34,32 @@ export interface FrameworkProfile {
 }
 
 export interface FrameworkInfo {
-  name: string
-  version: string
-  mode: string
-  plugins: Array<{
-    plugin_id: string
-    name: string
-    version: string
-    kind: string
+  tools: Array<{
+    tool_name: string
+    display_name: string
     summary: string
-    exports: {
-      tools: string[]
-      cards: string[]
-      skills: string[]
-    }
+    provider_type: string
+    scope: string
+    enabled: boolean
+    supports_card: boolean
+    card_type: string
   }>
   skills: Array<{
-    plugin_id: string
+    skill_name: string
+    display_name: string
+    summary: string
+    enabled: boolean
+    tool_names: string[]
+  }>
+  agents: Array<{
+    agent_id: string
     name: string
     description: string
-    tools: string[]
-    card_types: string[]
+    enabled: boolean
+    published: boolean
+    is_default: boolean
+    global_tool_names: string[]
+    skill_names: string[]
   }>
 }
 
@@ -74,7 +79,7 @@ const DEFAULT_PROFILE: FrameworkProfile = {
     app_name: 'CSAgent Studio',
     app_subtitle: '通用客服智能体框架',
     welcome_title: '你好，我是通用客服智能体',
-    welcome_description: '可处理问答、查询、推荐、下单等常见客服流程。',
+    welcome_description: '可用于管理 Agent、技能、工具与卡片输出协议。',
     identity_label: '演示身份',
     identity_hint: '可选',
     selected_identity_prefix: '当前演示身份',
@@ -96,10 +101,10 @@ export function useFrameworkProfile() {
     try {
       const [profileResp, infoResp] = await Promise.all([
         fetch('/api/framework/profile'),
-        fetch('/api/framework/info'),
+        fetch('/api/platform/snapshot'),
       ])
       if (!profileResp.ok) throw new Error('读取框架配置失败')
-      if (!infoResp.ok) throw new Error('读取框架信息失败')
+      if (!infoResp.ok) throw new Error('读取平台注册中心失败')
       const profileData = await profileResp.json()
       const infoData = await infoResp.json()
       setProfile({ ...DEFAULT_PROFILE, ...profileData })

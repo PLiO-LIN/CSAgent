@@ -2,9 +2,11 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes.meta import router as framework_router
-from db.engine import init_db
+from routes.meta import router as framework_router
+from db.engine import init_db, Session
 from mcp_runtime import ensure_mcp_tools_loaded, shutdown_mcp_runtime
+from platform_registry import bootstrap_platform_registry
+from routes.platform import router as platform_router
 from routes.session import router as session_router
 from routes.chat import router as chat_ws_router, rest_router as chat_rest_router
 from config import settings
@@ -18,12 +20,9 @@ async def lifespan(app: FastAPI):
     logging.info("Database initialized")
     logging.info("Chat model: %s", settings.chat_model)
     await ensure_mcp_tools_loaded()
-    from tool.knowledge import init_knowledge
-    ok = await init_knowledge()
-    if ok:
-        logging.info("Knowledge initialized")
-    else:
-        logging.warning("Knowledge initialization failed at startup, will retry lazily")
+    async with Session() as db:
+        await bootstrap_platform_registry(db)
+    logging.info("Platform registry initialized")
     try:
         yield
     finally:
@@ -40,14 +39,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 挂载伪接口
-from mock.server import app as mock_app
-app.mount("/mock", mock_app)
-
 app.include_router(session_router)
 app.include_router(chat_ws_router)
 app.include_router(chat_rest_router)
 app.include_router(framework_router)
+app.include_router(platform_router)
 
 
 @app.get("/health")

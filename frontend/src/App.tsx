@@ -15,7 +15,7 @@ export default function App() {
       <div className="pointer-events-none absolute bottom-[-10%] left-1/2 h-[22rem] w-[22rem] -translate-x-1/2 rounded-full bg-[rgba(118,180,255,0.14)] blur-3xl" />
 
       <div className="relative mx-auto grid h-full max-w-[1480px] grid-rows-[minmax(0,1fr)_minmax(320px,38vh)] gap-4 xl:grid-cols-[minmax(0,1fr)_400px] xl:grid-rows-none">
-        <div className="telecom-panel h-full min-h-0">
+        <div className="studio-panel h-full min-h-0">
           <ChatPanel
             {...chat}
             appName={ui.app_name}
@@ -27,7 +27,7 @@ export default function App() {
             selectedIdentityPrefix={ui.selected_identity_prefix}
           />
         </div>
-        <div className="telecom-panel h-[38vh] min-h-[320px] overflow-hidden xl:h-full xl:min-h-0">
+        <div className="studio-panel h-[38vh] min-h-[320px] overflow-hidden xl:h-full xl:min-h-0">
           <FrameworkStudioPanel
             profile={framework.profile}
             info={framework.info}

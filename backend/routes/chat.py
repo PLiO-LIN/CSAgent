@@ -15,6 +15,7 @@ router = APIRouter()
 class ChatMessage(BaseModel):
     session_id: str = ""
     content: str = ""
+    agent_id: str = ""
     client_meta: dict = Field(default_factory=dict)
 
 
@@ -31,7 +32,11 @@ async def chat_ws(ws: WebSocket):
                 if not msg.session_id:
                     session = await crud.create_session(db, title=msg.content[:30] if msg.content else "新对话")
                     msg.session_id = session.id
+                    if msg.agent_id:
+                        await crud.update_session_metadata(db, msg.session_id, {"agent_id": msg.agent_id})
                     await ws.send_text(json.dumps({"type": "session", "session_id": session.id}, ensure_ascii=False))
+                elif msg.agent_id:
+                    await crud.update_session_metadata(db, msg.session_id, {"agent_id": msg.agent_id})
 
                 if msg.content:
                     await crud.add_message(db, msg.session_id, "user", [
@@ -43,7 +48,7 @@ async def chat_ws(ws: WebSocket):
                     ])
 
                 provider = factory.create()
-                async for event in loop.run(db, provider, msg.session_id):
+                async for event in loop.run(db, provider, msg.session_id, agent_id=msg.agent_id):
                     await ws.send_text(json.dumps(event.to_dict(), ensure_ascii=False))
 
     except WebSocketDisconnect:
@@ -64,6 +69,7 @@ class ChatRequest(BaseModel):
     session_id: str = ""
     content: str
     phone: str = ""
+    agent_id: str = ""
     client_meta: dict = Field(default_factory=dict)
     stream: bool = False
 
@@ -81,7 +87,7 @@ def _build_sse_response(req: ChatRequest, request: Request) -> StreamingResponse
             if created:
                 yield f"data: {json.dumps({'type': 'session', 'session_id': sid}, ensure_ascii=False)}\n\n"
 
-            async for event in _run_chat_events(db, sid, req.phone):
+            async for event in _run_chat_events(db, sid, req.phone, req.agent_id):
                 if await request.is_disconnected():
                     logger.info("SSE client disconnected sid=%s", sid)
                     break
@@ -106,7 +112,7 @@ async def chat_rest(req: ChatRequest, request: Request):
     async with Session() as db:
         sid, created = await _prepare_chat_turn(db, req)
         events = []
-        async for event in _run_chat_events(db, sid, req.phone):
+        async for event in _run_chat_events(db, sid, req.phone, req.agent_id):
             events.append(event)
 
     return _build_blocking_response(sid, events, session_created=created)
@@ -121,10 +127,14 @@ async def _prepare_chat_turn(db, req: ChatRequest) -> tuple[str, bool]:
         created = True
         if req.phone:
             await crud.update_session_metadata(db, sid, {"phone": req.phone})
+        if req.agent_id:
+            await crud.update_session_metadata(db, sid, {"agent_id": req.agent_id})
     elif req.phone:
         existing_phone = await crud.get_session_phone(db, sid)
         if not existing_phone:
             await crud.update_session_metadata(db, sid, {"phone": req.phone})
+    if req.agent_id:
+        await crud.update_session_metadata(db, sid, {"agent_id": req.agent_id})
 
     await crud.add_message(db, sid, "user", [
         {
@@ -136,9 +146,9 @@ async def _prepare_chat_turn(db, req: ChatRequest) -> tuple[str, bool]:
     return sid, created
 
 
-async def _run_chat_events(db, sid: str, phone: str):
+async def _run_chat_events(db, sid: str, phone: str, agent_id: str):
     provider = factory.create()
-    async for event in loop.run(db, provider, sid, phone=phone):
+    async for event in loop.run(db, provider, sid, phone=phone, agent_id=agent_id):
         yield event.to_dict()
 
 

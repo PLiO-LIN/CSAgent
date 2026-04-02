@@ -52,14 +52,12 @@ export default function FrameworkStudioPanel({
     setDraft(cloneProfile(profile))
   }, [profile])
 
-  const pluginSummary = useMemo(() => {
-    return (info?.plugins || []).map(plugin => ({
-      id: plugin.plugin_id,
-      name: plugin.name,
-      summary: plugin.summary,
-      toolCount: plugin.exports.tools.length,
-      skillCount: plugin.exports.skills.length,
-    }))
+  const registrySummary = useMemo(() => {
+    return {
+      tools: info?.tools || [],
+      skills: info?.skills || [],
+      agents: info?.agents || [],
+    }
   }, [info])
 
   const updatePrompt = (key: keyof FrameworkProfile['prompts'], value: string) => {
@@ -141,7 +139,7 @@ export default function FrameworkStudioPanel({
           <button
             onClick={() => void handleSave()}
             disabled={saving || loading}
-            className="telecom-primary-btn rounded-[16px] px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+            className="studio-primary-btn rounded-[16px] px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Save size={14} />
             {saving ? '保存中' : '保存'}
@@ -155,9 +153,9 @@ export default function FrameworkStudioPanel({
       </div>
 
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
-        <section className="telecom-inner-panel p-4">
+        <section className="studio-inner-panel p-4">
           <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800">
-            <Settings2 size={15} className="text-[var(--telecom-blue-600)]" />
+            <Settings2 size={15} className="text-[var(--studio-blue-600)]" />
             前端承载层
           </div>
           <div className="space-y-3">
@@ -166,7 +164,7 @@ export default function FrameworkStudioPanel({
               <input
                 value={draft.ui.app_name}
                 onChange={e => updateUi('app_name', e.target.value)}
-                className="telecom-input w-full px-3 py-2 text-sm"
+                className="studio-input w-full px-3 py-2 text-sm"
               />
             </div>
             <div>
@@ -174,7 +172,7 @@ export default function FrameworkStudioPanel({
               <input
                 value={draft.ui.app_subtitle}
                 onChange={e => updateUi('app_subtitle', e.target.value)}
-                className="telecom-input w-full px-3 py-2 text-sm"
+                className="studio-input w-full px-3 py-2 text-sm"
               />
             </div>
             <div>
@@ -182,7 +180,7 @@ export default function FrameworkStudioPanel({
               <input
                 value={draft.ui.welcome_title}
                 onChange={e => updateUi('welcome_title', e.target.value)}
-                className="telecom-input w-full px-3 py-2 text-sm"
+                className="studio-input w-full px-3 py-2 text-sm"
               />
             </div>
             <div>
@@ -191,7 +189,7 @@ export default function FrameworkStudioPanel({
                 value={draft.ui.welcome_description}
                 onChange={e => updateUi('welcome_description', e.target.value)}
                 rows={4}
-                className="telecom-input w-full px-3 py-2 text-sm"
+                className="studio-input w-full px-3 py-2 text-sm"
               />
             </div>
             <div>
@@ -200,7 +198,7 @@ export default function FrameworkStudioPanel({
                 value={draft.ui.quick_actions.join('\n')}
                 onChange={e => updateUi('quick_actions', e.target.value.split('\n').map(item => item.trim()).filter(Boolean))}
                 rows={4}
-                className="telecom-input w-full px-3 py-2 text-sm"
+                className="studio-input w-full px-3 py-2 text-sm"
               />
             </div>
             <div>
@@ -209,15 +207,15 @@ export default function FrameworkStudioPanel({
                 value={draft.ui.highlights.join('\n')}
                 onChange={e => updateUi('highlights', e.target.value.split('\n').map(item => item.trim()).filter(Boolean))}
                 rows={3}
-                className="telecom-input w-full px-3 py-2 text-sm"
+                className="studio-input w-full px-3 py-2 text-sm"
               />
             </div>
           </div>
         </section>
 
-        <section className="telecom-inner-panel p-4">
+        <section className="studio-inner-panel p-4">
           <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800">
-            <Database size={15} className="text-[var(--telecom-blue-600)]" />
+            <Database size={15} className="text-[var(--studio-blue-600)]" />
             {draft.ui.identity_label || '演示身份'}
           </div>
           <div className="text-xs leading-5 text-slate-500">{draft.ui.identity_hint || '可选；用于给演示工具补充默认用户标识。'}</div>
@@ -227,7 +225,7 @@ export default function FrameworkStudioPanel({
               <input
                 value={draft.ui.identity_label}
                 onChange={e => updateUi('identity_label', e.target.value)}
-                className="telecom-input w-full px-3 py-2 text-sm"
+                className="studio-input w-full px-3 py-2 text-sm"
               />
             </div>
             <div>
@@ -235,7 +233,7 @@ export default function FrameworkStudioPanel({
               <input
                 value={draft.ui.identity_hint}
                 onChange={e => updateUi('identity_hint', e.target.value)}
-                className="telecom-input w-full px-3 py-2 text-sm"
+                className="studio-input w-full px-3 py-2 text-sm"
               />
             </div>
             <div>
@@ -243,14 +241,14 @@ export default function FrameworkStudioPanel({
               <input
                 value={draft.ui.selected_identity_prefix}
                 onChange={e => updateUi('selected_identity_prefix', e.target.value)}
-                className="telecom-input w-full px-3 py-2 text-sm"
+                className="studio-input w-full px-3 py-2 text-sm"
               />
             </div>
           </div>
           <select
             value={selectedIdentity}
             onChange={e => onSelectIdentity(e.target.value)}
-            className="telecom-input mt-3 w-full px-3 py-2 text-sm"
+            className="studio-input mt-3 w-full px-3 py-2 text-sm"
           >
             {DEMO_IDENTITIES.map(item => (
               <option key={item.value || 'none'} value={item.value}>{item.label}</option>
@@ -258,9 +256,9 @@ export default function FrameworkStudioPanel({
           </select>
         </section>
 
-        <section className="telecom-inner-panel p-4">
+        <section className="studio-inner-panel p-4">
           <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800">
-            <Brain size={15} className="text-[var(--telecom-blue-600)]" />
+            <Brain size={15} className="text-[var(--studio-blue-600)]" />
             提示词
           </div>
           <div className="space-y-3">
@@ -270,7 +268,7 @@ export default function FrameworkStudioPanel({
                 value={draft.prompts.system_core}
                 onChange={e => updatePrompt('system_core', e.target.value)}
                 rows={8}
-                className="telecom-input w-full px-3 py-2 text-sm"
+                className="studio-input w-full px-3 py-2 text-sm"
               />
             </div>
             <div>
@@ -279,7 +277,7 @@ export default function FrameworkStudioPanel({
                 value={draft.prompts.skill_guide}
                 onChange={e => updatePrompt('skill_guide', e.target.value)}
                 rows={8}
-                className="telecom-input w-full px-3 py-2 text-sm"
+                className="studio-input w-full px-3 py-2 text-sm"
               />
             </div>
             <div>
@@ -294,7 +292,7 @@ export default function FrameworkStudioPanel({
                   },
                 }))}
                 rows={5}
-                className="telecom-input w-full px-3 py-2 text-sm"
+                className="studio-input w-full px-3 py-2 text-sm"
               />
             </div>
             <div>
@@ -303,19 +301,19 @@ export default function FrameworkStudioPanel({
                 value={draft.prompts.compaction}
                 onChange={e => updatePrompt('compaction', e.target.value)}
                 rows={6}
-                className="telecom-input w-full px-3 py-2 text-sm"
+                className="studio-input w-full px-3 py-2 text-sm"
               />
             </div>
           </div>
         </section>
 
-        <section className="telecom-inner-panel p-4">
+        <section className="studio-inner-panel p-4">
           <div className="mb-3 flex items-center justify-between gap-2 text-sm font-semibold text-slate-800">
             <div className="flex items-center gap-2">
-              <Brain size={15} className="text-[var(--telecom-blue-600)]" />
+              <Brain size={15} className="text-[var(--studio-blue-600)]" />
               长期记忆
             </div>
-            <button onClick={addMemory} className="telecom-secondary-btn rounded-[14px] px-3 py-1.5 text-xs">
+            <button onClick={addMemory} className="studio-secondary-btn rounded-[14px] px-3 py-1.5 text-xs">
               <Plus size={12} />
               新增
             </button>
@@ -349,7 +347,7 @@ export default function FrameworkStudioPanel({
                     top_k: Math.max(1, Number(e.target.value || 1)),
                   },
                 }))}
-                className="telecom-input w-full px-3 py-2 text-sm"
+                className="studio-input w-full px-3 py-2 text-sm"
               />
             </div>
           </div>
@@ -374,20 +372,20 @@ export default function FrameworkStudioPanel({
                     value={item.title}
                     onChange={e => updateMemory(index, { title: e.target.value })}
                     placeholder="记忆标题"
-                    className="telecom-input w-full px-3 py-2 text-sm"
+                    className="studio-input w-full px-3 py-2 text-sm"
                   />
                   <textarea
                     value={item.content}
                     onChange={e => updateMemory(index, { content: e.target.value })}
                     placeholder="记忆内容"
                     rows={4}
-                    className="telecom-input w-full px-3 py-2 text-sm"
+                    className="studio-input w-full px-3 py-2 text-sm"
                   />
                   <input
                     value={(item.tags || []).join(', ')}
                     onChange={e => updateMemory(index, { tags: e.target.value.split(',').map(tag => tag.trim()).filter(Boolean) })}
                     placeholder="标签，逗号分隔"
-                    className="telecom-input w-full px-3 py-2 text-sm"
+                    className="studio-input w-full px-3 py-2 text-sm"
                   />
                 </div>
               </div>
@@ -400,24 +398,62 @@ export default function FrameworkStudioPanel({
           </div>
         </section>
 
-        <section className="telecom-inner-panel p-4">
+        <section className="studio-inner-panel p-4">
           <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800">
-            <Puzzle size={15} className="text-[var(--telecom-blue-600)]" />
-            插件运行时
+            <Puzzle size={15} className="text-[var(--studio-blue-600)]" />
+            平台注册中心
           </div>
-          <div className="space-y-2">
-            {(pluginSummary || []).map(plugin => (
-              <div key={plugin.id} className="rounded-[16px] border border-[rgba(15,111,255,0.08)] bg-white/90 px-3 py-3">
-                <div className="text-sm font-medium text-slate-800">{plugin.name}</div>
-                <div className="mt-1 text-xs leading-5 text-slate-500">{plugin.summary || plugin.id}</div>
-                <div className="mt-2 text-[11px] text-slate-400">{plugin.id} · tools {plugin.toolCount} · skills {plugin.skillCount}</div>
-              </div>
-            ))}
-            {!loading && (!pluginSummary || pluginSummary.length === 0) && (
-              <div className="rounded-[16px] border border-dashed border-[rgba(15,111,255,0.14)] px-3 py-4 text-center text-xs text-slate-400">
-                当前没有发现已启用插件。
-              </div>
-            )}
+          <div className="grid gap-4 lg:grid-cols-3">
+            <div className="space-y-2">
+              <div className="text-xs font-medium uppercase tracking-[0.18em] text-slate-400">Agents</div>
+              {registrySummary.agents.map(agent => (
+                <div key={agent.agent_id} className="rounded-[16px] border border-[rgba(15,111,255,0.08)] bg-white/90 px-3 py-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-medium text-slate-800">{agent.name || agent.agent_id}</div>
+                    <div className="text-[11px] text-slate-400">{agent.is_default ? 'default' : agent.published ? 'published' : 'draft'}</div>
+                  </div>
+                  <div className="mt-1 text-xs leading-5 text-slate-500">{agent.description || agent.agent_id}</div>
+                  <div className="mt-2 text-[11px] text-slate-400">tools {agent.global_tool_names.length} · skills {agent.skill_names.length}</div>
+                </div>
+              ))}
+              {!loading && registrySummary.agents.length === 0 && (
+                <div className="rounded-[16px] border border-dashed border-[rgba(15,111,255,0.14)] px-3 py-4 text-center text-xs text-slate-400">
+                  当前没有 Agent 记录。
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-xs font-medium uppercase tracking-[0.18em] text-slate-400">Tools</div>
+              {registrySummary.tools.map(tool => (
+                <div key={tool.tool_name} className="rounded-[16px] border border-[rgba(15,111,255,0.08)] bg-white/90 px-3 py-3">
+                  <div className="text-sm font-medium text-slate-800">{tool.display_name || tool.tool_name}</div>
+                  <div className="mt-1 text-xs leading-5 text-slate-500">{tool.summary || tool.tool_name}</div>
+                  <div className="mt-2 text-[11px] text-slate-400">{tool.provider_type} · {tool.scope} · {tool.supports_card ? (tool.card_type || 'card') : 'no-card'}</div>
+                </div>
+              ))}
+              {!loading && registrySummary.tools.length === 0 && (
+                <div className="rounded-[16px] border border-dashed border-[rgba(15,111,255,0.14)] px-3 py-4 text-center text-xs text-slate-400">
+                  当前没有 Tool 记录。
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-xs font-medium uppercase tracking-[0.18em] text-slate-400">Skills</div>
+              {registrySummary.skills.map(skill => (
+                <div key={skill.skill_name} className="rounded-[16px] border border-[rgba(15,111,255,0.08)] bg-white/90 px-3 py-3">
+                  <div className="text-sm font-medium text-slate-800">{skill.display_name || skill.skill_name}</div>
+                  <div className="mt-1 text-xs leading-5 text-slate-500">{skill.summary || skill.skill_name}</div>
+                  <div className="mt-2 text-[11px] text-slate-400">{skill.tool_names.length ? skill.tool_names.join(', ') : '无绑定工具'}</div>
+                </div>
+              ))}
+              {!loading && registrySummary.skills.length === 0 && (
+                <div className="rounded-[16px] border border-dashed border-[rgba(15,111,255,0.14)] px-3 py-4 text-center text-xs text-slate-400">
+                  当前没有 Skill 记录。
+                </div>
+              )}
+            </div>
           </div>
         </section>
       </div>

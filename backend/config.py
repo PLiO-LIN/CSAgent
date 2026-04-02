@@ -146,14 +146,6 @@ class Settings(BaseModel):
     summary_recent_tool_limit: int = 6
     summary_max_output_tokens: int = 2000
 
-    # 知识库
-    klg_path: str = "../../telecom-agent/klg.xlsx"
-    klg_top_k: int = 5
-
-    # EOP 接口网关（留空则使用本地 mock 数据，填写后直接请求真实接口）
-    eop_base_url: str = ""
-    eop_token: str = "41777235-68c4-4931-bfd2-4a56e9167b43"
-
     # MCP
     mcp_enabled: bool = False
     mcp_tool_timeout_seconds: float = 60.0
@@ -162,7 +154,6 @@ class Settings(BaseModel):
     # 服务
     host: str = "0.0.0.0"
     port: int = 8200
-    mock_port: int = 8201
 
     @field_validator("database_url", mode="before")
     @classmethod
@@ -222,14 +213,6 @@ def _nest_yaml_sections(data: dict) -> dict:
             "recent_tool_limit": data.get("summary_recent_tool_limit", 6),
             "max_output_tokens": data.get("summary_max_output_tokens", 2000),
         },
-        "knowledge": {
-            "klg_path": data.get("klg_path", "../../telecom-agent/klg.xlsx"),
-            "klg_top_k": data.get("klg_top_k", 5),
-        },
-        "eop": {
-            "base_url": data.get("eop_base_url", ""),
-            "token": data.get("eop_token", "41777235-68c4-4931-bfd2-4a56e9167b43"),
-        },
         "mcp": {
             "enabled": data.get("mcp_enabled", False),
             "tool_timeout_seconds": data.get("mcp_tool_timeout_seconds", 60.0),
@@ -238,7 +221,6 @@ def _nest_yaml_sections(data: dict) -> dict:
         "server": {
             "host": data.get("host", "0.0.0.0"),
             "port": data.get("port", 8200),
-            "mock_port": data.get("mock_port", 8201),
         },
     }
 
@@ -301,20 +283,6 @@ def _flatten_yaml_sections(data: dict) -> dict:
     elif isinstance(agent, dict) and "compaction_threshold" in agent:
         flat["summary_trigger_context_tokens"] = agent.get("compaction_threshold")
 
-    knowledge = data.get("knowledge")
-    if isinstance(knowledge, dict):
-        if "klg_path" in knowledge:
-            flat["klg_path"] = knowledge.get("klg_path")
-        if "klg_top_k" in knowledge:
-            flat["klg_top_k"] = knowledge.get("klg_top_k")
-
-    eop = data.get("eop")
-    if isinstance(eop, dict):
-        if "base_url" in eop:
-            flat["eop_base_url"] = eop.get("base_url")
-        if "token" in eop:
-            flat["eop_token"] = eop.get("token")
-
     mcp = data.get("mcp")
     if isinstance(mcp, dict):
         if "enabled" in mcp:
@@ -330,8 +298,6 @@ def _flatten_yaml_sections(data: dict) -> dict:
             flat["host"] = server.get("host")
         if "port" in server:
             flat["port"] = server.get("port")
-        if "mock_port" in server:
-            flat["mock_port"] = server.get("mock_port")
     return flat
 
 
@@ -409,18 +375,6 @@ def _render_yaml(data: dict) -> str:
         "  # 总结调用最多允许模型输出多少 token。",
         f"  max_output_tokens: {_yaml_scalar(data.get('summary_max_output_tokens', 2000))}",
         "",
-        "knowledge:",
-        "  # 知识库 Excel 路径。默认 ../klg.xlsx 对应项目根目录的 klg.xlsx。",
-        f"  klg_path: {_yaml_scalar(data.get('klg_path', '../../telecom-agent/klg.xlsx'))}",
-        "  # 知识检索返回的候选条数。",
-        f"  klg_top_k: {_yaml_scalar(data.get('klg_top_k', 5))}",
-        "",
-        "eop:",
-        "  # 真实 EOP 网关地址；留空则走本地 mock 数据。",
-        f"  base_url: {_yaml_scalar(data.get('eop_base_url', ''))}",
-        "  # 真实 EOP 网关 token；走 mock 时可忽略。",
-        f"  token: {_yaml_scalar(data.get('eop_token', '41777235-68c4-4931-bfd2-4a56e9167b43'))}",
-        "",
         "mcp:",
         f"  enabled: {_yaml_scalar(data.get('mcp_enabled', False))}",
         f"  tool_timeout_seconds: {_yaml_scalar(data.get('mcp_tool_timeout_seconds', 60.0))}",
@@ -432,8 +386,6 @@ def _render_yaml(data: dict) -> str:
         f"  host: {_yaml_scalar(data.get('host', '0.0.0.0'))}",
         "  # FastAPI 主服务端口。",
         f"  port: {_yaml_scalar(data.get('port', 8200))}",
-        "  # 单独启动 mock.server 时使用的端口。",
-        f"  mock_port: {_yaml_scalar(data.get('mock_port', 8201))}",
     ]
     return "\n".join(lines) + "\n"
 

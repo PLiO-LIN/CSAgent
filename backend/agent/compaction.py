@@ -5,9 +5,15 @@ from config import settings
 from framework_profile import load_framework_profile
 
 
-async def compact(provider: Provider, messages: list[dict], agent_state: dict | None = None) -> str:
+async def compact(
+    provider: Provider,
+    messages: list[dict],
+    agent_state: dict | None = None,
+    summary_prompt: str = "",
+) -> str:
     """调用模型生成分层压缩摘要：结构化状态 + 最近关键工具结果 + continuity summary。"""
     profile = load_framework_profile()
+    compaction_prompt = str(summary_prompt or profile.prompts.compaction).strip()
     state_text = format_agent_state(agent_state or {}, include_history=True) or "(无结构化状态)"
     recent_tools = _recent_tool_outcomes(messages, limit=settings.summary_recent_tool_limit)
     conversation_text = _conversation_excerpt(messages, limit=settings.summary_excerpt_chars)
@@ -16,7 +22,7 @@ async def compact(provider: Provider, messages: list[dict], agent_state: dict | 
     resp = await provider.client.chat.completions.create(
         model=provider.model,
         messages=[
-            {"role": "system", "content": profile.prompts.compaction},
+            {"role": "system", "content": compaction_prompt},
             {
                 "role": "user",
                 "content": (

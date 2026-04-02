@@ -1,21 +1,15 @@
-from app.plugins.manifest import discover_plugins, discover_skills
+from tool.registry import all_tools, ensure_local_tools_loaded
 
 
-def test_seed_plugins_are_discovered():
-    plugins = discover_plugins()
-    ids = {item.plugin_id for item in plugins}
-    assert "global.base" in ids
-    assert "global.knowledge" in ids
-    assert "telecom.query" in ids
-    assert "telecom.recommend" in ids
-    assert "telecom.order" in ids
-    assert "telecom.recharge" in ids
+def test_platform_base_local_tools_are_loaded():
+    ensure_local_tools_loaded()
+    tools = all_tools()
+    assert "load_skills" in tools
+    assert "list_tools" in tools
+    assert "list_skills" in tools
 
 
-def test_seed_skills_are_discovered():
-    skills = discover_skills()
-    names = {item.name for item in skills}
-    assert "query" in names
-    assert "recommend" in names
-    assert "order" in names
-    assert "recharge" in names
+def test_platform_base_contains_only_core_local_tools_by_default():
+    ensure_local_tools_loaded()
+    tools = all_tools()
+    assert set(tools.keys()) == {"load_skills", "list_tools", "list_skills"}

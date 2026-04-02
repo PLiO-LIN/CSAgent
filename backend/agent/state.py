@@ -6,60 +6,6 @@ from typing import Any
 MAX_HISTORY = 8
 MAX_RECENT_OPERATIONS = 12
 
-SCENARIO_PHASES = {
-    "query": ["intent_collected", "querying", "completed", "blocked", "handoff_required"],
-    "recommend": [
-        "intent_collected",
-        "products_recommended",
-        "products_compared",
-        "product_selected",
-        "preview_ready",
-        "completed",
-        "blocked",
-        "handoff_required",
-    ],
-    "order": [
-        "intent_collected",
-        "preview_ready",
-        "existing_order_found",
-        "sms_code_ready",
-        "awaiting_user_confirmation",
-        "confirmation_approved",
-        "submitting",
-        "order_submitted",
-        "awaiting_payment",
-        "payment_confirmed",
-        "orders_queried",
-        "completed",
-        "blocked",
-        "handoff_required",
-    ],
-    "recharge": ["intent_collected", "amount_ready", "link_ready", "completed", "blocked", "handoff_required"],
-}
-
-PHASE_NEXT_ACTIONS = {
-    "intent_collected": ["补齐必要信息后再调用工具", "优先沿当前客服场景继续推进"],
-    "products_recommended": ["解释推荐理由", "如用户犹豫可继续比较", "如用户明确要办理可先预览下单"],
-    "products_compared": ["帮助用户收敛选择", "如用户明确要办理可先预览下单"],
-    "product_selected": ["继续生成下单预览", "确认资费和支付方式"],
-    "preview_ready": ["先确认资费与规则", "确认后再提交订单"],
-    "existing_order_found": ["先解释已存在订单", "优先继续支付或查询该订单状态"],
-    "sms_code_ready": ["引导用户在卡片中填写或核对验证码", "最终提交订单仅接受卡片按钮确认"],
-    "awaiting_user_confirmation": ["等待用户明确确认", "未确认前不要再次提交业务动作"],
-    "confirmation_approved": ["沿已确认参数继续执行下一步"],
-    "submitting": ["等待提交结果", "提交失败时说明原因并给出下一步"],
-    "order_submitted": ["说明订单已生成", "如需支付则引导进入支付确认"],
-    "awaiting_payment": ["提醒用户完成外部支付", "支付后优先确认支付结果或查询订单"],
-    "payment_confirmed": ["说明支付结果和生效信息", "如仍有疑问可继续查询订单状态"],
-    "orders_queried": ["基于订单状态继续处理", "待支付订单优先继续支付或确认支付结果"],
-    "amount_ready": ["让用户核对或修改充值金额", "确认金额后再生成充值链接"],
-    "link_ready": ["说明充值链接和付费方式", "提醒用户跳转后自行完成充值"],
-    "completed": ["本次业务闭环已完成", "如用户提出新需求可重新进入新场景"],
-    "blocked": ["解释当前阻塞原因", "给出补救动作或转人工/知识库渠道"],
-    "handoff_required": ["说明需要人工介入", "提供人工服务入口或办理渠道"],
-    "querying": ["等待查询结果", "拿到结果后直接回答用户"],
-}
-
 
 def now_text() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -474,26 +420,3 @@ def _normalize_workflow_machine(workflow: dict, previous: dict | None = None, sk
         workflow["next_actions"] = ["向用户解释当前限制", "补齐信息后再继续"]
 
     return workflow
-
-
-def _infer_current_task_id(entities: dict) -> str:
-    for key in ["order_id", "verification_seq", "preview_id", "selected_product_id", "base_product_id"]:
-        value = str((entities or {}).get(key, "") or "").strip()
-        if value:
-            return value
-    return ""
-
-
-def _default_next_actions(scenario: str, phase: str) -> list[str]:
-    actions = list(PHASE_NEXT_ACTIONS.get(str(phase or "").strip(), []))
-    if actions:
-        return actions
-    if str(scenario or "").strip() == "order":
-        return ["沿订单闭环继续推进", "必要时查询订单或确认支付结果"]
-    if str(scenario or "").strip() == "recommend":
-        return ["沿推荐闭环继续推进", "必要时继续比较或预览下单"]
-    if str(scenario or "").strip() == "query":
-        return ["优先完成查询并直接回答用户"]
-    if str(scenario or "").strip() == "recharge":
-        return ["围绕充值闭环继续推进", "确认金额与付费方式后再返回充值链接"]
-    return ["继续围绕当前用户诉求处理"]

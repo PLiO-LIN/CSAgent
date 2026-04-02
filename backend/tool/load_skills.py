@@ -2,7 +2,7 @@
 
 模型可以调用 load_skills 来：
 1. 不传参数 → 返回所有可用技能的摘要列表（name + description）
-2. 传 skill_name → 返回该技能的完整提示词 + 工具列表，由 loop 注入系统提示
+2. 传 skill_name → 返回该技能的完整提示词 + 工具列表，作为 tool_result 进入后续对话上下文
 
 技能是按场景组织的能力包，例如查询、推荐、下单；知识检索属于全局工具，不应作为 skill 加载。
 """
@@ -13,7 +13,7 @@ from tool.base import tool, ToolResult
     name="load_skills",
     description=(
         "列出或加载场景技能。不传参数返回所有可用技能摘要；"
-        "传入 skill_name 加载该场景技能的详细提示词和专属工具到当前对话。"
+        "传入 skill_name 加载该场景技能的完整说明，并通过工具结果提供给当前对话。"
         "mode 默认为 switch，表示切换到新的场景技能并停用旧场景技能；"
         "仅当确实需要跨场景并行处理时，才使用 append 追加保留已有技能。"
     ),
@@ -52,10 +52,9 @@ async def load_skills(skill_name: str = "", mode: str = "switch") -> ToolResult:
             return ToolResult(text="当前没有可用的技能。")
         lines = ["可用场景技能列表：", ""]
         for s in skills:
-            tool_names = ", ".join(s.tools) if s.tools else "无专属工具"
-            lines.append(f"- **{s.name}**: {s.description}  (工具: {tool_names})")
+            lines.append(s.summary_text(active=False))
         lines.append("")
-        lines.append("调用 load_skills(skill_name=\"技能名\", mode=\"switch\") 可切换到对应技能。")
+        lines.append("如需查看某个技能的完整正文，请调用 load_skills(skill_name=\"技能名\", mode=\"switch\")。")
         return ToolResult(text="\n".join(lines))
 
     skill = get_skill(skill_name)
@@ -71,7 +70,12 @@ async def load_skills(skill_name: str = "", mode: str = "switch") -> ToolResult:
         f"专属工具: {', '.join(skill.tools) if skill.tools else '无'}",
         f"加载模式: {mode}",
         "",
-        "技能提示词已注入系统上下文，专属工具已启用。",
+        "系统提示中仅保留技能摘要；完整技能正文通过本次工具结果提供。",
+        "专属工具已启用。",
+        "",
+        f"<skill name=\"{skill.name}\">",
+        skill.prompt or "(该技能未提供正文)",
+        "</skill>",
     ]
     return ToolResult(
         text="\n".join(lines),

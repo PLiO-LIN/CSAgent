@@ -4,21 +4,21 @@
 
 :root {
   color-scheme: light;
-  --telecom-blue-50: #f4f8ff;
-  --telecom-blue-100: #e3efff;
-  --telecom-blue-200: #c9deff;
-  --telecom-blue-300: #9fc6ff;
-  --telecom-blue-400: #72aeff;
-  --telecom-blue-500: #0f6fff;
-  --telecom-blue-600: #0b60e0;
-  --telecom-blue-700: #0b4ea8;
-  --telecom-blue-800: #0a356c;
-  --telecom-ink-900: #0d1f3b;
-  --telecom-ink-700: #355178;
-  --telecom-line: rgba(15, 111, 255, 0.12);
-  --telecom-line-strong: rgba(15, 111, 255, 0.22);
-  --telecom-surface: rgba(255, 255, 255, 0.86);
-  --telecom-shadow: 0 24px 60px rgba(13, 63, 145, 0.16);
+  --studio-blue-50: #f4f8ff;
+  --studio-blue-100: #e3efff;
+  --studio-blue-200: #c9deff;
+  --studio-blue-300: #9fc6ff;
+  --studio-blue-400: #72aeff;
+  --studio-blue-500: #0f6fff;
+  --studio-blue-600: #0b60e0;
+  --studio-blue-700: #0b4ea8;
+  --studio-blue-800: #0a356c;
+  --studio-ink-900: #0d1f3b;
+  --studio-ink-700: #355178;
+  --studio-line: rgba(15, 111, 255, 0.12);
+  --studio-line-strong: rgba(15, 111, 255, 0.22);
+  --studio-surface: rgba(255, 255, 255, 0.86);
+  --studio-shadow: 0 24px 60px rgba(13, 63, 145, 0.16);
 }
 
 html, body, #root {
@@ -29,7 +29,7 @@ html, body, #root {
 }
 
 body {
-  color: var(--telecom-ink-900);
+  color: var(--studio-ink-900);
   background:
     radial-gradient(circle at top left, rgba(71, 150, 255, 0.18), transparent 28%),
     radial-gradient(circle at top right, rgba(11, 96, 224, 0.16), transparent 34%),
@@ -69,21 +69,21 @@ body::after {
 .typing-cursor::after {
   content: '▎';
   animation: blink 0.7s steps(1) infinite;
-  color: var(--telecom-blue-500);
+  color: var(--studio-blue-500);
 }
 @keyframes blink { 50% { opacity: 0; } }
 
-.telecom-panel {
+.studio-panel {
   position: relative;
   overflow: hidden;
   border-radius: 34px;
   border: 1px solid rgba(255, 255, 255, 0.72);
-  background: var(--telecom-surface);
-  box-shadow: var(--telecom-shadow);
+  background: var(--studio-surface);
+  box-shadow: var(--studio-shadow);
   backdrop-filter: blur(28px);
 }
 
-.telecom-panel::before {
+.studio-panel::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -91,85 +91,19 @@ body::after {
   pointer-events: none;
 }
 
-.telecom-panel > * {
+.studio-panel > * {
   position: relative;
   z-index: 1;
 }
-
-.telecom-card {
-  --card-start: var(--telecom-blue-700);
-  --card-end: var(--telecom-blue-500);
-  --card-border: var(--telecom-line);
-  position: relative;
-  overflow: hidden;
-  border-radius: 24px;
-  border: 1px solid var(--card-border);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(238, 245, 255, 0.96));
-  box-shadow: 0 16px 40px rgba(13, 63, 145, 0.08);
-}
-
-.telecom-card::before {
-  content: '';
-  position: absolute;
-  inset: auto 0 0 0;
-  height: 110px;
-  background: linear-gradient(180deg, transparent, rgba(15, 111, 255, 0.045));
-  pointer-events: none;
-}
-
-.telecom-card > * {
-  position: relative;
-  z-index: 1;
-}
-
-.telecom-card-head {
-  background: linear-gradient(135deg, var(--card-start), var(--card-end));
-  color: white;
-}
-
-.telecom-card-accent-indigo {
-  --card-start: #1846b8;
-  --card-end: #0f70ff;
-}
-
-.telecom-card-accent-cyan {
-  --card-start: #0c59cf;
-  --card-end: #1f92ea;
-}
-
-.telecom-card-accent-sky {
-  --card-start: #0a4da8;
-  --card-end: #2492ff;
-}
-
-.telecom-card-accent-deep {
-  --card-start: #09397f;
-  --card-end: #0d61d9;
-}
-
-.telecom-card-accent-soft {
-  --card-start: #1a63d7;
-  --card-end: #5aa9ff;
-}
-
-.telecom-card-accent-light {
-  --card-start: #0d5ed2;
-  --card-end: #67b6ff;
-}
-
-.telecom-card-accent-subtle {
-  --card-border: rgba(15, 111, 255, 0.18);
-}
-
-.telecom-inner-panel,
-.telecom-metric {
+.studio-inner-panel,
+.studio-metric {
   border-radius: 22px;
   border: 1px solid rgba(15, 111, 255, 0.08);
   background: rgba(255, 255, 255, 0.95);
   box-shadow: 0 10px 24px rgba(13, 63, 145, 0.06);
 }
 
-.telecom-chip {
+.studio-chip {
   border-radius: 9999px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: rgba(255, 255, 255, 0.16);
@@ -180,43 +114,18 @@ body::after {
   backdrop-filter: blur(10px);
 }
 
-.telecom-chip-muted {
+.studio-chip-muted {
   border-radius: 9999px;
   border: 1px solid rgba(15, 111, 255, 0.12);
   background: rgba(15, 111, 255, 0.08);
   padding: 0.3rem 0.8rem;
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--telecom-blue-600);
+  color: var(--studio-blue-600);
 }
-
-.telecom-badge-success,
-.telecom-badge-warn,
-.telecom-badge-danger {
-  border-radius: 9999px;
-  padding: 0.28rem 0.72rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-.telecom-badge-success {
-  background: rgba(14, 165, 115, 0.12);
-  color: #11754f;
-}
-
-.telecom-badge-warn {
-  background: rgba(245, 158, 11, 0.12);
-  color: #9a5a06;
-}
-
-.telecom-badge-danger {
-  background: rgba(239, 68, 68, 0.1);
-  color: #b42318;
-}
-
-.telecom-primary-btn,
-.telecom-secondary-btn,
-.telecom-ghost-btn {
+.studio-primary-btn,
+.studio-secondary-btn,
+.studio-ghost-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -228,48 +137,48 @@ body::after {
   transition: transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
-.telecom-primary-btn {
+.studio-primary-btn {
   border: 1px solid transparent;
-  background: linear-gradient(135deg, var(--telecom-blue-700), var(--telecom-blue-500));
+  background: linear-gradient(135deg, var(--studio-blue-700), var(--studio-blue-500));
   color: white;
   box-shadow: 0 14px 28px rgba(15, 111, 255, 0.22);
 }
 
-.telecom-primary-btn:hover {
+.studio-primary-btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 18px 30px rgba(15, 111, 255, 0.28);
 }
 
-.telecom-secondary-btn {
+.studio-secondary-btn {
   border: 1px solid rgba(15, 111, 255, 0.14);
   background: rgba(255, 255, 255, 0.92);
-  color: var(--telecom-blue-700);
+  color: var(--studio-blue-700);
 }
 
-.telecom-secondary-btn:hover {
+.studio-secondary-btn:hover {
   background: rgba(240, 247, 255, 0.98);
   border-color: rgba(15, 111, 255, 0.22);
 }
 
-.telecom-ghost-btn {
+.studio-ghost-btn {
   border: 1px solid rgba(11, 96, 224, 0.1);
   background: rgba(15, 111, 255, 0.08);
-  color: var(--telecom-blue-600);
+  color: var(--studio-blue-600);
 }
 
-.telecom-ghost-btn:hover {
+.studio-ghost-btn:hover {
   background: rgba(15, 111, 255, 0.12);
 }
 
-.telecom-input {
+.studio-input {
   border-radius: 18px;
   border: 1px solid rgba(15, 111, 255, 0.12);
   background: rgba(247, 250, 255, 0.92);
-  color: var(--telecom-ink-900);
+  color: var(--studio-ink-900);
   transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
 }
 
-.telecom-input:focus {
+.studio-input:focus {
   outline: none;
   border-color: rgba(15, 111, 255, 0.38);
   background: rgba(255, 255, 255, 0.98);
@@ -287,7 +196,7 @@ body::after {
   padding: 0.1em 0.3em;
   border-radius: 0.25em;
   font-size: 0.85em;
-  color: var(--telecom-blue-700);
+  color: var(--studio-blue-700);
 }
 .markdown-body pre {
   background: rgba(240, 247, 255, 0.95);
@@ -299,12 +208,12 @@ body::after {
 }
 .markdown-body pre code { background: none; padding: 0; }
 .markdown-body strong { font-weight: 600; }
-.markdown-body a { color: var(--telecom-blue-600); text-decoration: underline; }
+.markdown-body a { color: var(--studio-blue-600); text-decoration: underline; }
 .markdown-body blockquote {
   border-left: 3px solid rgba(15, 111, 255, 0.28);
   padding-left: 0.8em;
   margin: 0.4em 0;
-  color: var(--telecom-ink-700);
+  color: var(--studio-ink-700);
   background: rgba(240, 247, 255, 0.72);
   border-radius: 0 12px 12px 0;
   padding-top: 0.4em;

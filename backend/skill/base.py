@@ -1,15 +1,7 @@
 """
-Skill 规约系统（v2）：从 .md 文件加载技能定义。
+Skill 规约系统（v3）：从平台注册表加载技能定义。
 
-技能文件位于 backend/skill/skills/<name>/SKILL.md，使用 YAML frontmatter：
----
-name: query
-description: 查询技能
-tools:
-  - query_package
-  - query_balance
----
-<markdown prompt content>
+当前主来源：平台注册中心中的 Skill 文档与元数据。
 
 工具分为两类：
 - 全局工具（scope="global"）：始终可用，如 load_skills
@@ -18,9 +10,9 @@ tools:
 import logging
 from dataclasses import dataclass, field
 
-from plugin_runtime import discover_skills, ensure_plugin_runtime_loaded
+from platform_registry import get_skill_record, has_registry_skills, list_skill_records
 from provider.base import ToolDef
-from tool.base import get_tool, ToolEntry, global_tool_defs
+from tool.base import get_tool, ToolEntry
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +22,11 @@ class Skill:
     name: str
     description: str
     tools: list[str] = field(default_factory=list)
+    plugin_id: str = ""
+    card_types: list[str] = field(default_factory=list)
+    global_tools: list[str] = field(default_factory=list)
+    entry_intents: list[str] = field(default_factory=list)
+    phases: list[str] = field(default_factory=list)
     prompt: str = ""
 
     def available_tools(self) -> list[ToolDef]:
@@ -49,69 +46,47 @@ class Skill:
                 result.append(entry)
         return result
 
+    def summary_text(self, active: bool = False) -> str:
+        tool_names = ", ".join(self.tools) if self.tools else "无专属工具"
+        status = "已激活" if active else "可按需加载"
+        return (
+            f"- `{self.name}`（{status}）: {self.description or '无描述'}；"
+            f"工具: {tool_names}；"
+            f"需要完整说明时调用 `load_skills(skill_name=\"{self.name}\")`。"
+        )
+
 
 # ─── 技能加载 ───
 
 _skill_cache: dict[str, Skill] = {}
 
 
-def _parse_frontmatter(text: str) -> tuple[dict, str]:
-    """解析 YAML frontmatter + markdown body"""
-    if not text.startswith("---"):
-        return {}, text
-    end = text.find("---", 3)
-    if end == -1:
-        return {}, text
-    fm_text = text[3:end].strip()
-    body = text[end + 3:].strip()
-    meta: dict = {}
-    current_key = None
-    current_list: list[str] | None = None
-    for line in fm_text.split("\n"):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if stripped.startswith("- ") and current_list is not None:
-            current_list.append(stripped[2:].strip())
-        elif ":" in stripped:
-            if current_key and current_list is not None:
-                meta[current_key] = current_list
-            key, val = stripped.split(":", 1)
-            key = key.strip()
-            val = val.strip()
-            if val:
-                meta[key] = val
-                current_key = None
-                current_list = None
-            else:
-                current_key = key
-                current_list = []
-        else:
-            if current_key and current_list is not None:
-                current_list.append(stripped)
-    if current_key and current_list is not None:
-        meta[current_key] = current_list
-    return meta, body
-
-
 def _load_all_skills() -> dict[str, Skill]:
-    """按插件运行时扫描技能定义。"""
-    ensure_plugin_runtime_loaded()
-    discovered = discover_skills()
-    signature = tuple(sorted(f"{item.plugin_id}:{item.name}:{item.path}" for item in discovered))
+    """按平台注册表加载技能定义。"""
+    if not has_registry_skills():
+        _skill_cache.clear()
+        setattr(_load_all_skills, "_signature", ())
+        return _skill_cache
+
+    records = list_skill_records(include_disabled=False, scoped=True)
+    signature = tuple(sorted(f"{item.skill_name}:{item.updated_at}" for item in records))
     if _skill_cache and getattr(_load_all_skills, "_signature", ()) == signature:
         return _skill_cache
 
     _skill_cache.clear()
-    for descriptor in discovered:
-        try:
-            raw = open(descriptor.path, "r", encoding="utf-8").read()
-            _meta, body = _parse_frontmatter(raw)
-            skill = Skill(name=descriptor.name, description=descriptor.description, tools=descriptor.tools, prompt=body)
-            _skill_cache[skill.name] = skill
-            logger.info("Loaded plugin skill: %s (tools=%s)", skill.name, descriptor.tools)
-        except Exception as e:
-            logger.error("Failed to load plugin skill from %s: %s", descriptor.path, e)
+    for record in records:
+        skill = Skill(
+            name=record.skill_name,
+            description=record.summary,
+            tools=record.tool_names,
+            plugin_id=str((record.metadata or {}).get("plugin_id", record.source_type) or record.source_type),
+            card_types=record.card_types,
+            global_tools=record.global_tool_names,
+            entry_intents=record.entry_intents,
+            phases=record.phases,
+            prompt=record.document_md,
+        )
+        _skill_cache[skill.name] = skill
     setattr(_load_all_skills, "_signature", signature)
     return _skill_cache
 
@@ -123,8 +98,32 @@ def list_skills() -> list[Skill]:
 
 def get_skill(name: str) -> Skill | None:
     """按名称获取技能"""
-    skills = _load_all_skills()
-    return skills.get(name)
+    target = str(name or "").strip()
+    record = get_skill_record(target)
+    if not record:
+        return None
+    return Skill(
+        name=record.skill_name,
+        description=record.summary,
+        tools=record.tool_names,
+        plugin_id=str((record.metadata or {}).get("plugin_id", record.source_type) or record.source_type),
+        card_types=record.card_types,
+        global_tools=record.global_tool_names,
+        entry_intents=record.entry_intents,
+        phases=record.phases,
+        prompt=record.document_md,
+    )
+
+
+def render_skill_catalog(active_skill_names: list[str] | None = None) -> str:
+    skills = list_skills()
+    if not skills:
+        return ""
+    active_names = {str(name or "").strip() for name in (active_skill_names or []) if str(name or "").strip()}
+    lines = ["可用技能摘要：", ""]
+    for skill in skills:
+        lines.append(skill.summary_text(active=skill.name in active_names))
+    return "\n".join(lines)
 
 
 def resolve(name: str | None = None) -> Skill:

@@ -73,7 +73,7 @@ class ToolPolicy:
         if self.external_side_effect:
             hints.append("会产生外部业务动作")
         if self.fallback_to_knowledge:
-            hints.append("条件不满足时优先改用 search_knowledge")
+            hints.append("条件不满足时优先补充规则、限制或说明信息")
         if self.phase_guidance:
             hints.append(self.phase_guidance)
         return "；".join(hints)

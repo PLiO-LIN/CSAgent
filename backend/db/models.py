@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Integer, Text, Float, ForeignKey, JSON
+from sqlalchemy import String, Integer, Text, Float, ForeignKey, JSON, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from db.engine import Base
 
@@ -115,3 +115,69 @@ class AgentEventLogModel(Base):
     payload_json: Mapped[str] = mapped_column(Text, default="{}")
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[float] = mapped_column(Float, default=lambda: datetime.now().timestamp())
+
+
+class PlatformToolModel(Base):
+    __tablename__ = "platform_tool"
+
+    tool_name: Mapped[str] = mapped_column(String(128), primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(256), default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    provider_type: Mapped[str] = mapped_column(String(32), default="local")
+    source_ref: Mapped[str] = mapped_column(String(256), default="")
+    scope: Mapped[str] = mapped_column(String(16), default="skill")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    supports_card: Mapped[bool] = mapped_column(Boolean, default=False)
+    card_type: Mapped[str] = mapped_column(String(64), default="")
+    input_schema: Mapped[dict | None] = mapped_column(JSON, default=None)
+    output_schema: Mapped[dict | None] = mapped_column(JSON, default=None)
+    policy: Mapped[dict | None] = mapped_column(JSON, default=None)
+    card_binding: Mapped[dict | None] = mapped_column(JSON, default=None)
+    transport_config: Mapped[dict | None] = mapped_column(JSON, default=None)
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSON, default=None)
+    created_at: Mapped[float] = mapped_column(Float, default=lambda: datetime.now().timestamp())
+    updated_at: Mapped[float] = mapped_column(Float, default=lambda: datetime.now().timestamp())
+
+
+class PlatformSkillModel(Base):
+    __tablename__ = "platform_skill"
+
+    skill_name: Mapped[str] = mapped_column(String(128), primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(256), default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    document_md: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    tool_names: Mapped[list | None] = mapped_column(JSON, default=None)
+    global_tool_names: Mapped[list | None] = mapped_column(JSON, default=None)
+    card_types: Mapped[list | None] = mapped_column(JSON, default=None)
+    entry_intents: Mapped[list | None] = mapped_column(JSON, default=None)
+    phases: Mapped[list | None] = mapped_column(JSON, default=None)
+    source_type: Mapped[str] = mapped_column(String(32), default="seed")
+    source_ref: Mapped[str] = mapped_column(String(256), default="")
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSON, default=None)
+    created_at: Mapped[float] = mapped_column(Float, default=lambda: datetime.now().timestamp())
+    updated_at: Mapped[float] = mapped_column(Float, default=lambda: datetime.now().timestamp())
+
+
+class PlatformAgentModel(Base):
+    __tablename__ = "platform_agent"
+
+    agent_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    name: Mapped[str] = mapped_column(String(256), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    published: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    system_core_prompt: Mapped[str] = mapped_column(Text, default="")
+    persona_prompt: Mapped[str] = mapped_column(Text, default="")
+    skill_guide_prompt: Mapped[str] = mapped_column(Text, default="")
+    summary_prompt: Mapped[str] = mapped_column(Text, default="")
+    memory_prompt: Mapped[str] = mapped_column(Text, default="")
+    global_tool_names: Mapped[list | None] = mapped_column(JSON, default=None)
+    skill_names: Mapped[list | None] = mapped_column(JSON, default=None)
+    model_config: Mapped[dict | None] = mapped_column(JSON, default=None)
+    tool_policy_config: Mapped[dict | None] = mapped_column(JSON, default=None)
+    memory_config: Mapped[dict | None] = mapped_column(JSON, default=None)
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSON, default=None)
+    created_at: Mapped[float] = mapped_column(Float, default=lambda: datetime.now().timestamp())
+    updated_at: Mapped[float] = mapped_column(Float, default=lambda: datetime.now().timestamp())

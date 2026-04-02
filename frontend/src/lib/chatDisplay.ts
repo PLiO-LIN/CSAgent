@@ -64,6 +64,19 @@ function registerAlias(aliases: EntityAliases, id: unknown, name: unknown) {
   aliases[key] = value
 }
 
+function pickReadableName(value: Record<string, any>, fallbackName = '') {
+  return firstText(
+    value.display_name,
+    value.displayName,
+    value.title,
+    value.label,
+    value.name,
+    value.summary,
+    value.description,
+    fallbackName,
+  )
+}
+
 export function extractEntityAliases(card: any): EntityAliases {
   const aliases: EntityAliases = {}
   const seen = new WeakSet<object>()
@@ -78,40 +91,20 @@ export function extractEntityAliases(card: any): EntityAliases {
     if (seen.has(value)) return
     seen.add(value)
 
-    const productName = firstText(
-      value.productName,
-      value.product_name,
-      value.name,
-      fallbackName,
-    )
-
-    registerAlias(aliases, value.productId ?? value.product_id, productName)
-
-    if (value.product && typeof value.product === 'object') {
-      visit(value.product, firstText(value.product.productName, productName))
-    }
-
-    if (value.order && typeof value.order === 'object') {
-      visit(value.order, firstText(value.order.productName, productName))
-    }
-
-    if (value.duplicateOrder && typeof value.duplicateOrder === 'object') {
-      const duplicateName = firstText(
-        value.duplicateOrder.productName,
-        value.product?.productName,
-        productName,
-      )
-      registerAlias(aliases, value.duplicateOrder.productId, duplicateName)
-      visit(value.duplicateOrder, duplicateName)
-    }
-
-    if (Array.isArray(value.items)) {
-      value.items.forEach((item: any) => visit(item, productName))
-    }
-
-    if (Array.isArray(value.products)) {
-      value.products.forEach((item: any) => visit(item, productName))
-    }
+    const readableName = pickReadableName(value, fallbackName)
+    Object.entries(value).forEach(([key, child]) => {
+      const lowerKey = key.toLowerCase()
+      if (lowerKey === 'id' || lowerKey.endsWith('id') || lowerKey.endsWith('_id')) {
+        registerAlias(aliases, child, readableName)
+      }
+      if (Array.isArray(child)) {
+        child.forEach(item => visit(item, readableName))
+        return
+      }
+      if (child && typeof child === 'object') {
+        visit(child, readableName)
+      }
+    })
   }
 
   visit(card)
