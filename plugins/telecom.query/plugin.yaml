@@ -1,0 +1,32 @@
+plugin_id: telecom.query
+name: 电信查询插件
+version: 0.1.0
+sdk_version: 0.1.0
+kind: capability
+enabled: true
+owner: telecom
+summary: 承载套餐、余额、账单、积分、用户信息等查询能力
+compatibility:
+  core: ">=0.1.0,<1.0.0"
+exports:
+  tools:
+    - query_package
+    - query_balance
+    - query_bill
+    - query_points
+    - query_user_info
+  cards:
+    - package
+    - balance
+    - bill
+    - points
+    - user_info
+  skills:
+    - query
+dependencies:
+  plugins:
+    - global.base
+    - global.knowledge
+  global_tools:
+    - load_skills
+    - search_knowledge

@@ -1,0 +1,77 @@
+app:
+  name: CSAgent
+  version: 0.2.0
+  mode: native_core
+
+server:
+  host: 0.0.0.0
+  port: 8200
+  mock_port: 8201
+  cors_origins:
+    - http://127.0.0.1:3000
+    - http://localhost:3000
+    - http://127.0.0.1:5173
+    - http://localhost:5173
+
+llm:
+  provider: openai_compatible
+  api_key: ""
+  base_url: https://api.siliconflow.cn/v1
+  chat_model: Qwen/Qwen3-32B
+  embed_model: BAAI/bge-m3
+
+database:
+  url: sqlite+aiosqlite:///./csagent.db
+
+agent:
+  max_steps: 30
+  max_tool_output: 16000
+
+context:
+  budget_tokens: 28000
+  output_reserve_tokens: 4000
+  local_thin_trigger_tokens: 18000
+  local_tool_chars: 1200
+  local_assistant_chars: 1000
+  local_keep_messages: 14
+  local_recent_tool_messages: 4
+
+summary:
+  trigger_turns: 0
+  trigger_context_tokens: 80000
+  keep_recent_turns: 2
+  excerpt_chars: 60000
+  recent_tool_limit: 6
+  max_output_tokens: 2000
+
+knowledge:
+  klg_path: ../../telecom-agent/klg.xlsx
+  klg_top_k: 5
+
+eop:
+  base_url: ""
+  token: 41777235-68c4-4931-bfd2-4a56e9167b43
+
+mcp:
+  enabled: false
+  tool_timeout_seconds: 60
+  servers: {}
+
+legacy_bridge:
+  enabled: false
+  base_url: http://127.0.0.1:8000
+  timeout_seconds: 120
+
+plugins:
+  root_dir: ../plugins
+  enabled_ids:
+    - global.base
+    - global.knowledge
+    - telecom.query
+    - telecom.recommend
+    - telecom.order
+    - telecom.recharge
+
+notes:
+  config_entry: backend/config.yaml
+  purpose: 在 CSAgent 中原生承载当前电信客服智能体能力
