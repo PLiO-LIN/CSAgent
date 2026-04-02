@@ -20,7 +20,7 @@ export default function BalanceCard({ data }: { data: any }) {
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
             {(billingType || feeCycleType) && <div className="telecom-chip">{billingType || '-'} / {feeCycleType || '-'}</div>}
-            <div className="telecom-chip">手机号 {data.phone}</div>
+            <div className="telecom-chip">用户标识 {data.phone}</div>
           </div>
         </div>
         <div className="mt-4 text-3xl font-semibold">{data.balance || '0.00'}元</div>

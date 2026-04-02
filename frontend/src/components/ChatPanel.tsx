@@ -5,6 +5,13 @@ import type { ChatMessage } from '../hooks/useChat'
 import type { ChatSendHandler, EntityAliases } from '../lib/chatDisplay'
 
 interface Props {
+  appName: string
+  appSubtitle: string
+  welcomeTitle: string
+  welcomeDescription: string
+  quickActions: string[]
+  highlights: string[]
+  selectedIdentityPrefix: string
   messages: ChatMessage[]
   loading: boolean
   phone: string
@@ -15,15 +22,47 @@ interface Props {
   toggle: (msgId: string, idx: number) => void
 }
 
-const QUICK = ['查询我的套餐用量', '查一下本月账单', '给我推荐适合我的产品', '查一下我的当前订单']
+const DEFAULT_QUICK = ['帮我回答一个常见问题', '帮我查询当前信息', '给我做一个推荐', '帮我发起一个下单流程']
+const DEFAULT_HIGHLIGHTS = ['插件化扩展', '工具与技能协同', '长期记忆可编辑']
 
-export default function ChatPanel({ messages, loading, phone, entityAliases, send, stop, reset, toggle }: Props) {
+export default function ChatPanel({
+  appName,
+  appSubtitle,
+  welcomeTitle,
+  welcomeDescription,
+  quickActions,
+  highlights,
+  selectedIdentityPrefix,
+  messages,
+  loading,
+  phone,
+  entityAliases,
+  send,
+  stop,
+  reset,
+  toggle,
+}: Props) {
   const [input, setInput] = useState('')
   const bottom = useRef<HTMLDivElement>(null)
-  const highlights = [
-    { icon: ShieldCheck, label: '安全办理' },
-    { icon: RadioTower, label: '业务直达' },
-    { icon: Sparkles, label: '智能推荐' },
+  const highlightItems = (highlights.length ? highlights : DEFAULT_HIGHLIGHTS).slice(0, 3).map((label, index) => ({
+    icon: [ShieldCheck, RadioTower, Sparkles][index] || Sparkles,
+    label,
+  }))
+  const actionItems = quickActions.length ? quickActions : DEFAULT_QUICK
+
+  const identityText = phone ? `${selectedIdentityPrefix || '当前演示身份'} · ${phone}` : ''
+
+  const headerTitle = appName || 'CSAgent Studio'
+  const headerSubtitle = appSubtitle || '通用客服智能体框架'
+  const emptyTitle = welcomeTitle || '你好，我是通用客服智能体'
+  const emptyDescription = welcomeDescription || '可处理问答、查询、推荐、下单等常见客服流程，并支持技能、工具、卡片和长期记忆扩展。'
+
+  const quickLabel = actionItems.map(item => item.trim()).filter(Boolean)
+
+  const chips = highlightItems.length ? highlightItems : [
+    { icon: ShieldCheck, label: '插件化扩展' },
+    { icon: RadioTower, label: '工具协同' },
+    { icon: Sparkles, label: '长期记忆' },
   ]
 
   const scrollSignature = useMemo(() => messages.map(msg => [
@@ -56,15 +95,15 @@ export default function ChatPanel({ messages, loading, phone, entityAliases, sen
         <div className="relative flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="flex h-12 w-12 items-center justify-center rounded-[20px] border border-white/20 bg-white/16 backdrop-blur">
-              <span className="text-xl font-bold tracking-[0.08em]">翼</span>
+              <span className="text-base font-bold tracking-[0.08em]">AI</span>
             </div>
             <div>
-              <h1 className="text-base font-semibold tracking-[0.04em] text-white">中国电信智能客服</h1>
-              <p className="mt-1 text-xs text-white/78">小翼在线服务台{phone ? ` · 已绑定 ${phone}` : ''}</p>
+              <h1 className="text-base font-semibold tracking-[0.04em] text-white">{headerTitle}</h1>
+              <p className="mt-1 text-xs text-white/78">{headerSubtitle}{identityText ? ` · ${identityText}` : ''}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className="telecom-chip hidden sm:inline-flex">7×24 在线服务</span>
+            <span className="telecom-chip hidden sm:inline-flex">通用客服工作台</span>
             <button onClick={reset} className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/15 bg-white/10 text-white/78 transition-colors hover:bg-white/16 hover:text-white" title="新对话">
               <RotateCcw size={18} />
             </button>
@@ -72,7 +111,7 @@ export default function ChatPanel({ messages, loading, phone, entityAliases, sen
         </div>
 
         <div className="relative mt-4 flex flex-wrap gap-2">
-          {highlights.map((item, idx) => {
+          {chips.map((item, idx) => {
             const Icon = item.icon
             return (
               <div key={idx} className="telecom-chip inline-flex items-center gap-1.5">
@@ -94,12 +133,12 @@ export default function ChatPanel({ messages, loading, phone, entityAliases, sen
               </div>
 
               <div className="mt-6">
-                <p className="text-lg font-semibold text-slate-800">您好，这里是中国电信智能客服</p>
-                <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">可为您处理套餐查询、余额账单、产品推荐、订单支付、充值确认等常见业务，整体体验会更接近电信在线客服工作台。</p>
+                <p className="text-lg font-semibold text-slate-800">{emptyTitle}</p>
+                <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">{emptyDescription}</p>
               </div>
 
               <div className="mt-6 flex flex-wrap justify-center gap-2">
-                {highlights.map((item, idx) => {
+                {chips.map((item, idx) => {
                   const Icon = item.icon
                   return (
                     <div key={idx} className="telecom-chip-muted inline-flex items-center gap-1.5">
@@ -111,7 +150,7 @@ export default function ChatPanel({ messages, loading, phone, entityAliases, sen
               </div>
 
               <div className="mt-8 flex flex-wrap justify-center gap-3">
-                {QUICK.map(q => (
+                {quickLabel.map(q => (
                   <button
                     key={q}
                     onClick={() => send(q)}
@@ -130,7 +169,7 @@ export default function ChatPanel({ messages, loading, phone, entityAliases, sen
         {loading && !messages.find(m => m.streaming) && (
           <div className="flex gap-3 mb-4">
             <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#0a4da8,#0f6fff)] text-white shadow-[0_12px_26px_rgba(15,111,255,0.24)]">
-              <span className="text-white text-xs font-bold">翼</span>
+              <span className="text-white text-xs font-bold">AI</span>
             </div>
             <div className="telecom-inner-panel rounded-2xl rounded-tl-sm px-4 py-3">
               <Loader2 size={16} className="animate-spin text-[var(--telecom-blue-500)]" />
@@ -153,7 +192,7 @@ export default function ChatPanel({ messages, loading, phone, entityAliases, sen
                   submit()
                 }
               }}
-              placeholder={loading ? '正在回复中，可点击右侧停止' : '输入您的问题...'}
+              placeholder={loading ? '正在回复中，可点击右侧停止' : '输入你的问题，或描述需要处理的客服流程...'}
               rows={1}
               className="telecom-input min-h-[52px] w-full resize-none px-4 py-3 text-sm disabled:bg-slate-50 disabled:text-slate-400"
             />

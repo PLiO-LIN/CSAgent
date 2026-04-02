@@ -15,16 +15,14 @@ tools:
 - 全局工具（scope="global"）：始终可用，如 load_skills
 - 技能工具（scope="skill"）：仅当对应技能被加载后才可用
 """
-import os
 import logging
-from pathlib import Path
 from dataclasses import dataclass, field
+
+from plugin_runtime import discover_skills, ensure_plugin_runtime_loaded
 from provider.base import ToolDef
 from tool.base import get_tool, ToolEntry, global_tool_defs
 
 logger = logging.getLogger(__name__)
-
-SKILLS_DIR = Path(__file__).parent / "skills"
 
 
 @dataclass
@@ -97,39 +95,24 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
 
 
 def _load_all_skills() -> dict[str, Skill]:
-    """扫描 skills 目录，加载所有 SKILL.md"""
-    if _skill_cache:
+    """按插件运行时扫描技能定义。"""
+    ensure_plugin_runtime_loaded()
+    discovered = discover_skills()
+    signature = tuple(sorted(f"{item.plugin_id}:{item.name}:{item.path}" for item in discovered))
+    if _skill_cache and getattr(_load_all_skills, "_signature", ()) == signature:
         return _skill_cache
-    if not SKILLS_DIR.is_dir():
-        logger.warning("Skills directory not found: %s", SKILLS_DIR)
-        return {}
-    for entry in SKILLS_DIR.iterdir():
-        if not entry.is_dir():
-            continue
-        skill_file = entry / "SKILL.md"
-        if not skill_file.exists():
-            continue
+
+    _skill_cache.clear()
+    for descriptor in discovered:
         try:
-            raw = skill_file.read_text(encoding="utf-8")
-            meta, body = _parse_frontmatter(raw)
-            name = meta.get("name", entry.name)
-            desc = meta.get("description", "")
-            enabled = str(meta.get("enabled", "true")).strip().lower() not in {"false", "0", "no"}
-            tools = meta.get("tools", [])
-            if isinstance(tools, str):
-                tools = [tools]
-            tools = [t for t in tools if str(t).strip()]
-            if not enabled:
-                logger.info("Skip disabled skill: %s", name)
-                continue
-            if not tools:
-                logger.info("Skip non-scenario skill without tools: %s", name)
-                continue
-            skill = Skill(name=name, description=desc, tools=tools, prompt=body)
-            _skill_cache[name] = skill
-            logger.info("Loaded skill: %s (tools=%s)", name, tools)
+            raw = open(descriptor.path, "r", encoding="utf-8").read()
+            _meta, body = _parse_frontmatter(raw)
+            skill = Skill(name=descriptor.name, description=descriptor.description, tools=descriptor.tools, prompt=body)
+            _skill_cache[skill.name] = skill
+            logger.info("Loaded plugin skill: %s (tools=%s)", skill.name, descriptor.tools)
         except Exception as e:
-            logger.error("Failed to load skill from %s: %s", skill_file, e)
+            logger.error("Failed to load plugin skill from %s: %s", descriptor.path, e)
+    setattr(_load_all_skills, "_signature", signature)
     return _skill_cache
 
 

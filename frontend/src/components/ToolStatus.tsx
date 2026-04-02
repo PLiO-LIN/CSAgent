@@ -5,12 +5,12 @@ interface Props {
 }
 
 const TOOL_LABELS: Record<string, string> = {
-  query_plan: '查询套餐',
-  recommend_plan: '推荐套餐',
-  order_plan: '办理套餐',
-  query_bill: '查询账单',
+  query_plan: '信息查询',
+  recommend_plan: '方案推荐',
+  order_plan: '流程办理',
+  query_bill: '记录查询',
   verify_identity: '身份验证',
-  search_knowledge: '知识库搜索',
+  search_knowledge: '知识检索',
 }
 
 export default function ToolStatus({ tools }: Props) {

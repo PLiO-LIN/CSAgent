@@ -20,13 +20,13 @@ export default function PhoneEntry({ onConfirm }: Props) {
   const selectedUser = MOCK_USERS.find(item => item.phone === phone)
   const highlights = [
     { icon: ShieldCheck, label: '安全可信' },
-    { icon: RadioTower, label: '电信业务直连' },
-    { icon: Sparkles, label: '智能场景推荐' },
+    { icon: RadioTower, label: '演示身份接入' },
+    { icon: Sparkles, label: '智能场景体验' },
   ]
 
   const submit = () => {
     if (!phone) {
-      setError('请选择一个虚拟用户')
+      setError('请选择一个演示身份')
       return
     }
     setError('')
@@ -41,11 +41,11 @@ export default function PhoneEntry({ onConfirm }: Props) {
         <div className="pointer-events-none absolute right-0 top-0 h-32 w-44 rounded-full bg-[rgba(255,255,255,0.16)] blur-3xl" />
         <div className="relative flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-[20px] border border-white/20 bg-white/16 backdrop-blur">
-            <span className="text-xl font-bold tracking-[0.08em]">翼</span>
+            <span className="text-base font-bold tracking-[0.08em]">AI</span>
           </div>
           <div>
-            <h1 className="text-base font-semibold tracking-[0.04em] text-white">中国电信智能客服</h1>
-            <p className="mt-1 text-xs text-white/78">小翼在线服务台</p>
+            <h1 className="text-base font-semibold tracking-[0.04em] text-white">CSAgent Studio</h1>
+            <p className="mt-1 text-xs text-white/78">通用客服智能体演示入口</p>
           </div>
         </div>
 
@@ -62,7 +62,7 @@ export default function PhoneEntry({ onConfirm }: Props) {
         </div>
       </div>
 
-      {/* 手机号输入区 */}
+      {/* 演示身份选择 */}
       <div className="flex flex-1 items-center justify-center px-6 py-8 sm:px-8">
         <div className="w-full max-w-3xl rounded-[30px] border border-white/70 bg-white/72 p-6 shadow-[0_22px_54px_rgba(13,63,145,0.10)] backdrop-blur-xl sm:p-8">
           <div className="grid gap-8 lg:grid-cols-[1.1fr,0.9fr] lg:items-center">
@@ -71,8 +71,8 @@ export default function PhoneEntry({ onConfirm }: Props) {
                 <Phone size={34} className="text-[var(--telecom-blue-600)]" />
               </div>
 
-              <h2 className="mt-6 text-[1.55rem] font-semibold tracking-[0.02em] text-slate-800">欢迎接入中国电信在线服务</h2>
-              <p className="mt-3 max-w-xl text-sm leading-7 text-slate-500">请选择一个虚拟用户，我们会按对应号码的套餐、余额、账单和订单画像，为您呈现更接近中国电信客服工作台的服务体验。</p>
+              <h2 className="mt-6 text-[1.55rem] font-semibold tracking-[0.02em] text-slate-800">欢迎进入通用客服演示</h2>
+              <p className="mt-3 max-w-xl text-sm leading-7 text-slate-500">请选择一个演示身份。进入对话后，该标识会作为示例用户身份，供查询、推荐、下单等流程工具复用。</p>
 
               <div className="mt-6 grid gap-3 sm:grid-cols-3">
                 {highlights.map((item, idx) => {
@@ -92,67 +92,67 @@ export default function PhoneEntry({ onConfirm }: Props) {
 
             <div className="space-y-4 rounded-[26px] border border-[rgba(15,111,255,0.08)] bg-[linear-gradient(180deg,rgba(247,250,255,0.92),rgba(240,247,255,0.82))] p-5 shadow-[0_14px_32px_rgba(13,63,145,0.08)]">
               <div>
-                <div className="text-sm font-semibold text-slate-800">选择虚拟用户</div>
-                <div className="mt-1 text-xs leading-5 text-slate-500">进入对话后，将以该号码的真实业务画像进行查询、推荐与办理演示。</div>
+                <div className="text-sm font-semibold text-slate-800">选择演示身份</div>
+                <div className="mt-1 text-xs leading-5 text-slate-500">进入对话后，会把该标识作为默认用户身份参数传递给需要它的工具。</div>
               </div>
 
-          <div>
-            <div className="relative">
-              <Phone size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--telecom-blue-400)]" />
-              <select
-                value={phone}
-                onChange={e => {
-                  setPhone(e.target.value)
-                  setError('')
-                }}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') submit()
-                }}
-                className="telecom-input w-full appearance-none pl-12 pr-10 py-3 text-base"
-                autoFocus
+              <div>
+                <div className="relative">
+                  <Phone size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--telecom-blue-400)]" />
+                  <select
+                    value={phone}
+                    onChange={e => {
+                      setPhone(e.target.value)
+                      setError('')
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') submit()
+                    }}
+                    className="telecom-input w-full appearance-none pl-12 pr-10 py-3 text-base"
+                    autoFocus
+                  >
+                    <option value="">请选择演示身份</option>
+                    {MOCK_USERS.map(user => (
+                      <option key={user.phone} value={user.phone}>
+                        {user.name} · {user.phone}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={18} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-[var(--telecom-blue-400)]" />
+                </div>
+                {error && (
+                  <p className="mt-1.5 pl-1 text-xs text-rose-500">{error}</p>
+                )}
+              </div>
+
+              {selectedUser && (
+                <div className="telecom-card telecom-card-accent-soft px-4 py-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-800">{selectedUser.name}</div>
+                      <div className="mt-1 text-xs text-slate-500">{selectedUser.phone}</div>
+                    </div>
+                    <div className="telecom-chip-muted text-[11px]">
+                      {selectedUser.desc}
+                    </div>
+                  </div>
+                  <div className="telecom-inner-panel mt-3 px-3 py-3 text-sm text-slate-600">
+                    当前示例档案：<span className="font-medium text-slate-800">{selectedUser.plan}</span>
+                  </div>
+                </div>
+              )}
+
+              <button
+                onClick={submit}
+                className="telecom-primary-btn w-full rounded-[18px] py-3.5"
               >
-                <option value="">请选择虚拟用户</option>
-                {MOCK_USERS.map(user => (
-                  <option key={user.phone} value={user.phone}>
-                    {user.name} · {user.phone}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown size={18} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-[var(--telecom-blue-400)]" />
-            </div>
-            {error && (
-              <p className="mt-1.5 pl-1 text-xs text-rose-500">{error}</p>
-            )}
-          </div>
+                开始咨询
+                <ArrowRight size={18} />
+              </button>
 
-          {selectedUser && (
-            <div className="telecom-card telecom-card-accent-soft px-4 py-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-slate-800">{selectedUser.name}</div>
-                  <div className="mt-1 text-xs text-slate-500">{selectedUser.phone}</div>
-                </div>
-                <div className="telecom-chip-muted text-[11px]">
-                  {selectedUser.desc}
-                </div>
-              </div>
-              <div className="telecom-inner-panel mt-3 px-3 py-3 text-sm text-slate-600">
-                当前套餐：<span className="font-medium text-slate-800">{selectedUser.plan}</span>
-              </div>
-            </div>
-          )}
-
-          <button
-            onClick={submit}
-            className="telecom-primary-btn w-full rounded-[18px] py-3.5"
-          >
-            开始咨询
-            <ArrowRight size={18} />
-          </button>
-
-          <p className="text-center text-xs text-slate-400">
-            选择用户后，可直接查询套餐、余额、账单、订单等信息
-          </p>
+              <p className="text-center text-xs text-slate-400">
+                选择身份后，可直接体验查询、推荐、下单等常见流程
+              </p>
             </div>
           </div>
         </div>

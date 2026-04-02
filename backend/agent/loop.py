@@ -229,13 +229,13 @@ def _trim_text(value: Any, limit: int = 240) -> str:
 
 def _workflow_log_snapshot(agent_state: dict) -> dict[str, Any]:
     workflow = (agent_state.get("workflow_state") or {})
+    skill = (agent_state.get("skill_state") or {})
     pending = (agent_state.get("pending_confirmation") or {})
     runtime = (agent_state.get("runtime_state") or {})
     return {
-        "scenario": str(workflow.get("scenario", "") or "").strip(),
-        "phase": str(workflow.get("phase", "") or "").strip(),
+        "active_skill": str(skill.get("active_skill", "") or "").strip(),
+        "active_skills": list(skill.get("active_skills") or []),
         "goal": _trim_text(workflow.get("goal", ""), 160),
-        "current_task_id": str(workflow.get("current_task_id", "") or "").strip(),
         "blocked_reason": _trim_text(workflow.get("blocked_reason", ""), 160),
         "next_actions": list(workflow.get("next_actions") or []),
         "pending_tool": str(pending.get("tool_name", "") or "").strip(),
@@ -333,7 +333,7 @@ async def run(
             clear_pending_confirmation(agent_state)
             update_workflow_state(
                 agent_state,
-                {"flags": {"awaiting_confirmation": False}},
+                {"blocked_reason": "", "blocked_by": "", "next_actions": []},
                 history_entry={"kind": "confirmation", "summary": "用户取消了待确认动作"},
             )
             state_dirty = True
@@ -539,7 +539,13 @@ async def run(
         }
         if last_tool_policy_warning:
             runtime_controls["tool_policy_warning"] = last_tool_policy_warning
-        system = build_system("\n\n".join(skill_prompts), phone=phone, agent_state=agent_state, runtime_controls=runtime_controls)
+        system = build_system(
+            "\n\n".join(skill_prompts),
+            phone=phone,
+            agent_state=agent_state,
+            runtime_controls=runtime_controls,
+            latest_user_text=last_user.get("text", ""),
+        )
         tools = _collect_tools(loaded_skills)
 
         sys_text = "\n\n".join([s for s in system if s]).strip()
@@ -864,7 +870,7 @@ async def run(
                     clear_pending_confirmation(agent_state)
                     update_workflow_state(
                         agent_state,
-                        {"phase": "confirmation_approved", "flags": {"awaiting_confirmation": False}, "blocked_reason": "", "blocked_by": "", "next_actions": []},
+                        {"blocked_reason": "", "blocked_by": "", "next_actions": []},
                         history_entry={"kind": "confirmation", "summary": f"用户已确认执行 {name}"},
                     )
                     state_dirty = True
@@ -885,7 +891,7 @@ async def run(
                     )
                     update_workflow_state(
                         agent_state,
-                        {"phase": "awaiting_user_confirmation", "flags": {"awaiting_confirmation": True}, "blocked_reason": "", "blocked_by": "", "next_actions": []},
+                        {"blocked_reason": "", "blocked_by": "", "next_actions": []},
                         history_entry={"kind": "confirmation_request", "summary": f"已请求用户确认执行 {name}"},
                     )
                     state_dirty = True
@@ -917,7 +923,7 @@ async def run(
                 if entry.policy.external_side_effect:
                     update_workflow_state(
                         agent_state,
-                        {"phase": "submitting", "blocked_reason": "", "blocked_by": "", "next_actions": []},
+                        {"blocked_reason": "", "blocked_by": "", "next_actions": []},
                         history_entry={"kind": "tool_execution", "summary": f"准备执行外部业务动作 {name}"},
                     )
                     state_dirty = True
@@ -1025,7 +1031,7 @@ async def run(
                         set_active_skill(agent_state, skill_loaded_name, mode=skill_mode)
                         update_workflow_state(
                             agent_state,
-                            {"scenario": skill_loaded_name, "phase": "intent_collected", "blocked_reason": "", "blocked_by": "", "next_actions": []},
+                            {"blocked_reason": "", "blocked_by": "", "next_actions": []},
                             history_entry={"kind": "load_skills", "summary": f"已加载技能 {skill_loaded_name}（{skill_mode}）"},
                         )
                         loaded_skills = _load_skills_from_state(agent_state)

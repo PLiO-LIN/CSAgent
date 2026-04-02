@@ -96,11 +96,13 @@ class ToolPolicy:
 
 _registry: dict[str, "ToolEntry"] = {}
 _dynamic_tool_provider: Callable[[], dict[str, "ToolEntry"]] | None = None
+_tool_visibility_provider: Callable[["ToolEntry"], bool] | None = None
 
 
 class ToolEntry:
     def __init__(self, name: str, description: str, parameters: dict, func: Callable,
-                 require_confirm: bool = False, scope: str = "skill", policy: ToolPolicy | dict | None = None):
+                 require_confirm: bool = False, scope: str = "skill", policy: ToolPolicy | dict | None = None,
+                 source: str = "local"):
         self.name = name
         self.description = description
         self.parameters = parameters
@@ -108,6 +110,7 @@ class ToolEntry:
         self.require_confirm = require_confirm
         self.scope = scope  # "global" = 始终可用, "skill" = 仅当技能加载时可用
         self.policy = ToolPolicy.from_value(policy, require_confirm=require_confirm)
+        self.source = str(source or "local").strip() or "local"
 
     def to_def(self) -> ToolDef:
         description = str(self.description or "").strip()
@@ -175,9 +178,10 @@ def tool(
     require_confirm: bool = False,
     scope: str = "skill",
     policy: ToolPolicy | dict | None = None,
+    source: str = "local",
 ):
     def decorator(func: Callable) -> Callable:
-        entry = ToolEntry(name, description, parameters, func, require_confirm, scope=scope, policy=policy)
+        entry = ToolEntry(name, description, parameters, func, require_confirm, scope=scope, policy=policy, source=source)
         _registry[name] = entry
         return func
     return decorator
@@ -186,6 +190,11 @@ def tool(
 def set_dynamic_tool_provider(provider: Callable[[], dict[str, ToolEntry]] | None) -> None:
     global _dynamic_tool_provider
     _dynamic_tool_provider = provider
+
+
+def set_tool_visibility_provider(provider: Callable[[ToolEntry], bool] | None) -> None:
+    global _tool_visibility_provider
+    _tool_visibility_provider = provider
 
 
 def _runtime_tools() -> dict[str, ToolEntry]:
@@ -202,7 +211,17 @@ def _runtime_tools() -> dict[str, ToolEntry]:
 def _merged_tools() -> dict[str, ToolEntry]:
     tools = dict(_registry)
     tools.update(_runtime_tools())
-    return tools
+    if not _tool_visibility_provider:
+        return tools
+    visible: dict[str, ToolEntry] = {}
+    for name, entry in tools.items():
+        try:
+            if _tool_visibility_provider(entry):
+                visible[name] = entry
+        except Exception:
+            logger.exception("Failed to evaluate tool visibility for %s", name)
+            visible[name] = entry
+    return visible
 
 
 def all_tools() -> dict[str, ToolEntry]:

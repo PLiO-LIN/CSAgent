@@ -209,7 +209,7 @@ export default function MessageBubble({ message, toggle, send, entityAliases }: 
   return (
     <div className="flex gap-3 mb-4">
       <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#0a4da8,#0f6fff)] shadow-[0_12px_24px_rgba(15,111,255,0.2)]">
-        <span className="text-white text-xs font-bold">翼</span>
+        <span className="text-white text-xs font-bold">AI</span>
       </div>
       <div className="max-w-[85%] min-w-0 space-y-2">
         {/* 思考内容 - 可折叠 */}

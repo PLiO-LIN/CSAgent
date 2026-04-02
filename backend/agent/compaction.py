@@ -2,20 +2,12 @@ import json
 from provider.base import Provider
 from agent.state import format_agent_state
 from config import settings
-
-COMPACTION_PROMPT = """你将为一个电信客服 agent 生成对话压缩摘要，用于替代冗长历史。
-请只输出“continuity summary”部分，重点包含：
-1. 用户当前核心诉求、偏好和限制条件
-2. 已完成的关键步骤和重要结论
-3. 当前处于哪个业务阶段
-4. 接下来最合理的下一步
-5. 不要重复抄写结构化状态和最近工具结果，因为这些会在外层单独保留
-
-要求：中文、简洁、可供后续轮次直接延续。"""
+from framework_profile import load_framework_profile
 
 
 async def compact(provider: Provider, messages: list[dict], agent_state: dict | None = None) -> str:
     """调用模型生成分层压缩摘要：结构化状态 + 最近关键工具结果 + continuity summary。"""
+    profile = load_framework_profile()
     state_text = format_agent_state(agent_state or {}, include_history=True) or "(无结构化状态)"
     recent_tools = _recent_tool_outcomes(messages, limit=settings.summary_recent_tool_limit)
     conversation_text = _conversation_excerpt(messages, limit=settings.summary_excerpt_chars)
@@ -24,7 +16,7 @@ async def compact(provider: Provider, messages: list[dict], agent_state: dict | 
     resp = await provider.client.chat.completions.create(
         model=provider.model,
         messages=[
-            {"role": "system", "content": COMPACTION_PROMPT},
+            {"role": "system", "content": profile.prompts.compaction},
             {
                 "role": "user",
                 "content": (

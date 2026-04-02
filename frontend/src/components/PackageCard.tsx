@@ -12,8 +12,8 @@ export default function PackageCard({ data }: { data: any }) {
       <div className="telecom-card-head px-4 py-4 text-white">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="text-sm font-semibold">{data.title || '套餐用量'}</div>
-            <div className="mt-1 text-xs text-white/80">手机号 {data.phone}</div>
+            <div className="text-sm font-semibold">{data.title || '用量概览'}</div>
+            <div className="mt-1 text-xs text-white/80">用户标识 {data.phone}</div>
           </div>
           <div className="telecom-chip">账期 {data.month}</div>
         </div>
@@ -68,7 +68,7 @@ export default function PackageCard({ data }: { data: any }) {
       })}
       {excess.filter((it: any) => Number(it.show_value || 0) > 0).length > 0 && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50/88 px-4 py-3 text-sm text-amber-700">
-          套餐外：
+          额外消耗：
           <span className="ml-1">
             {excess.filter((it: any) => Number(it.show_value || 0) > 0).map((it: any) => `${it.show_name}${it.show_value}${it.show_unit}`).join('、')}
           </span>

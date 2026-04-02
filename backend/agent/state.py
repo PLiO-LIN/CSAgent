@@ -65,6 +65,17 @@ def now_text() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+WORKFLOW_DEFAULTS = {
+    "goal": "",
+    "last_user_message": "",
+    "blocked_reason": "",
+    "blocked_by": "",
+    "next_actions": [],
+    "history": [],
+    "updated_at": "",
+}
+
+
 def default_agent_state() -> dict:
     return {
         "skill_state": {
@@ -73,52 +84,7 @@ def default_agent_state() -> dict:
             "skill_history": [],
             "updated_at": "",
         },
-        "workflow_state": {
-            "scenario": "",
-            "phase": "",
-            "goal": "",
-            "last_user_message": "",
-            "blocked_reason": "",
-            "blocked_by": "",
-            "next_actions": [],
-            "service_channel": "",
-            "current_task_id": "",
-            "requires_human_handoff": False,
-            "constraints": [],
-            "entities": {
-                "base_product_id": "",
-                "candidate_product_ids": [],
-                "compare_product_ids": [],
-                "recommend_mode": "",
-                "selected_product_id": "",
-                "selected_product_name": "",
-                "preview_id": "",
-                "pay_mode": "",
-                "sms_code": "",
-                "verification_seq": "",
-                "duplicate_order_id": "",
-                "order_id": "",
-                "order_status": "",
-                "pay_status": "",
-                "restriction_summary": "",
-                "recharge_amount": "",
-                "recharge_amount_yuan": "",
-                "recharge_link": "",
-                "recharge_billing_mode": "",
-            },
-            "flags": {
-                "has_recommendation": False,
-                "has_comparison": False,
-                "preview_ready": False,
-                "awaiting_confirmation": False,
-                "sms_code_ready": False,
-                "order_submitted": False,
-                "payment_confirmed": False,
-                "recharge_ready": False,
-            },
-            "history": [],
-            "updated_at": "",
-        },
+        "workflow_state": deepcopy(WORKFLOW_DEFAULTS),
         "runtime_state": {
             "recent_operations": [],
             "last_user_action": {},
@@ -141,20 +107,8 @@ def load_agent_state(metadata: dict | None = None) -> dict:
     state["skill_state"].setdefault("active_skill", "")
     state["skill_state"].setdefault("active_skills", [])
     state["skill_state"].setdefault("skill_history", [])
-    state["workflow_state"].setdefault("scenario", "")
-    state["workflow_state"].setdefault("phase", "")
-    state["workflow_state"].setdefault("goal", "")
-    state["workflow_state"].setdefault("last_user_message", "")
-    state["workflow_state"].setdefault("blocked_reason", "")
-    state["workflow_state"].setdefault("blocked_by", "")
-    state["workflow_state"].setdefault("next_actions", [])
-    state["workflow_state"].setdefault("service_channel", "")
-    state["workflow_state"].setdefault("current_task_id", "")
-    state["workflow_state"].setdefault("requires_human_handoff", False)
-    state["workflow_state"].setdefault("constraints", [])
-    state["workflow_state"].setdefault("entities", {})
-    state["workflow_state"].setdefault("flags", {})
-    state["workflow_state"].setdefault("history", [])
+    workflow = state.get("workflow_state") or {}
+    state["workflow_state"] = {key: deepcopy(workflow.get(key, value)) for key, value in WORKFLOW_DEFAULTS.items()}
     state.setdefault("runtime_state", {})
     state["runtime_state"].setdefault("recent_operations", [])
     state["runtime_state"].setdefault("last_user_action", {})
@@ -162,10 +116,6 @@ def load_agent_state(metadata: dict | None = None) -> dict:
     state["runtime_state"].setdefault("last_compaction_error", "")
     state["runtime_state"].setdefault("context_budget", {})
     state["runtime_state"].setdefault("updated_at", "")
-    for key, value in default_agent_state()["workflow_state"]["entities"].items():
-        state["workflow_state"]["entities"].setdefault(key, deepcopy(value))
-    for key, value in default_agent_state()["workflow_state"]["flags"].items():
-        state["workflow_state"]["flags"].setdefault(key, value)
     state["skill_state"]["active_skills"] = _dedup_list(state["skill_state"].get("active_skills", []))
     if state["skill_state"]["active_skill"] and state["skill_state"]["active_skill"] not in state["skill_state"]["active_skills"]:
         state["skill_state"]["active_skills"].append(state["skill_state"]["active_skill"])
@@ -229,22 +179,10 @@ def set_pending_confirmation(
 
 def update_workflow_state(state: dict, patch: dict | None = None, history_entry: str | dict | None = None) -> dict:
     workflow = state.setdefault("workflow_state", default_agent_state()["workflow_state"])
-    previous = deepcopy(workflow)
-    incoming_scenario = str(((patch or {}).get("scenario", "") or "")).strip()
-    current_scenario = str((workflow.get("scenario", "") or "")).strip()
-    if incoming_scenario and incoming_scenario != current_scenario:
-        preserved_history = deepcopy(workflow.get("history", []))
-        preserved_goal = str(workflow.get("goal", "") or "").strip()
-        preserved_last_user_message = str(workflow.get("last_user_message", "") or "").strip()
-        reset_workflow = deepcopy(default_agent_state()["workflow_state"])
-        reset_workflow["history"] = preserved_history
-        reset_workflow["goal"] = preserved_goal
-        reset_workflow["last_user_message"] = preserved_last_user_message
-        workflow.clear()
-        workflow.update(reset_workflow)
     if patch:
-        _deep_merge(workflow, patch)
-    _normalize_workflow_machine(workflow, previous=previous, skill_state=state.get("skill_state") or {})
+        allowed_patch = {key: deepcopy(value) for key, value in (patch or {}).items() if key in WORKFLOW_DEFAULTS}
+        _deep_merge(workflow, allowed_patch)
+    _normalize_workflow_machine(workflow, skill_state=state.get("skill_state") or {})
     if history_entry:
         history = workflow.setdefault("history", [])
         if isinstance(history_entry, str):
@@ -265,12 +203,6 @@ def update_workflow_user_message(state: dict, text: str) -> dict:
     workflow["last_user_message"] = text
     if text and not _is_control_message(text):
         workflow["goal"] = text[:160]
-        if not str(workflow.get("phase", "")).strip():
-            workflow["phase"] = "intent_collected"
-        if not str(workflow.get("scenario", "")).strip():
-            active_skill = str(((state.get("skill_state") or {}).get("active_skill") or "")).strip()
-            if active_skill:
-                workflow["scenario"] = active_skill
     _normalize_workflow_machine(workflow, skill_state=state.get("skill_state") or {})
     workflow["updated_at"] = now_text()
     state["updated_at"] = workflow["updated_at"]
@@ -366,46 +298,21 @@ def format_agent_state(state: dict, include_history: bool = True) -> str:
         if active_skills:
             lines.append(f"- 当前启用技能集合: {', '.join(active_skills)}")
 
-    scenario = str(workflow.get("scenario", "")).strip()
-    phase = str(workflow.get("phase", "")).strip()
     goal = str(workflow.get("goal", "")).strip()
     blocked_reason = str(workflow.get("blocked_reason", "")).strip()
     blocked_by = str(workflow.get("blocked_by", "")).strip()
-    service_channel = str(workflow.get("service_channel", "")).strip()
-    current_task_id = str(workflow.get("current_task_id", "")).strip()
     next_actions = [str(x).strip() for x in workflow.get("next_actions", []) if str(x).strip()]
-    constraints = [str(x).strip() for x in workflow.get("constraints", []) if str(x).strip()]
-    entities = workflow.get("entities") or {}
-    flags = workflow.get("flags") or {}
     history = workflow.get("history") or []
-    if scenario or phase or goal or blocked_reason or blocked_by or next_actions or constraints or service_channel or current_task_id or _has_truthy(entities) or _has_truthy(flags):
-        lines.append("### 当前 workflow_state")
-        if scenario:
-            lines.append(f"- scenario: {scenario}")
-        if phase:
-            lines.append(f"- phase: {phase}")
+    if goal or blocked_reason or blocked_by or next_actions:
+        lines.append("### 当前对话运行态")
         if goal:
             lines.append(f"- goal: {goal}")
-        if current_task_id:
-            lines.append(f"- current_task_id: {current_task_id}")
-        if service_channel:
-            lines.append(f"- service_channel: {service_channel}")
         if blocked_reason:
             lines.append(f"- blocked_reason: {blocked_reason}")
         if blocked_by:
             lines.append(f"- blocked_by: {blocked_by}")
-        if workflow.get("requires_human_handoff"):
-            lines.append("- requires_human_handoff: True")
         if next_actions:
             lines.append(f"- next_actions: {'; '.join(next_actions)}")
-        if constraints:
-            lines.append(f"- constraints: {'; '.join(constraints)}")
-        entity_lines = _format_mapping_lines("- entities", entities)
-        if entity_lines:
-            lines.extend(entity_lines)
-        flag_lines = _format_mapping_lines("- flags", flags)
-        if flag_lines:
-            lines.extend(flag_lines)
         if include_history and history:
             lines.append("- recent_history:")
             for item in history[-4:]:
@@ -557,77 +464,14 @@ def _format_mapping_lines(label: str, data: dict) -> list[str]:
 
 
 def _normalize_workflow_machine(workflow: dict, previous: dict | None = None, skill_state: dict | None = None) -> dict:
-    workflow["scenario"] = str(workflow.get("scenario", "") or "").strip()
-    workflow["phase"] = str(workflow.get("phase", "") or "").strip()
     workflow["goal"] = str(workflow.get("goal", "") or "").strip()
     workflow["last_user_message"] = str(workflow.get("last_user_message", "") or "").strip()
     workflow["blocked_reason"] = str(workflow.get("blocked_reason", "") or "").strip()
     workflow["blocked_by"] = str(workflow.get("blocked_by", "") or "").strip()
-    workflow["service_channel"] = str(workflow.get("service_channel", "") or "").strip()
-    workflow["current_task_id"] = str(workflow.get("current_task_id", "") or "").strip()
-    workflow["constraints"] = _dedup_list(workflow.get("constraints", []))
     workflow["next_actions"] = _dedup_list(workflow.get("next_actions", []))
-    workflow["entities"] = workflow.get("entities") or {}
-    workflow["flags"] = workflow.get("flags") or {}
-
-    if not workflow["scenario"]:
-        active_skill = str(((skill_state or {}).get("active_skill") or "")).strip()
-        if active_skill:
-            workflow["scenario"] = active_skill
-
-    if workflow["scenario"] and not workflow["phase"]:
-        workflow["phase"] = "intent_collected"
-
-    phase = workflow["phase"]
-    phase_changed = bool(previous and previous.get("phase") != phase)
-    entities = workflow["entities"]
-    flags = workflow["flags"]
-    if phase in {"products_recommended", "products_compared", "preview_ready", "existing_order_found"}:
-        flags["has_recommendation"] = True
-    if phase == "products_compared":
-        flags["has_comparison"] = True
-    if phase in {"preview_ready", "existing_order_found", "sms_code_ready", "awaiting_user_confirmation", "confirmation_approved", "submitting", "order_submitted", "awaiting_payment", "payment_confirmed", "orders_queried", "completed"}:
-        flags["preview_ready"] = bool(flags.get("preview_ready") or entities.get("preview_id") or entities.get("selected_product_id"))
-    if phase == "awaiting_user_confirmation":
-        flags["awaiting_confirmation"] = True
-    elif phase:
-        flags["awaiting_confirmation"] = False
-    if phase == "sms_code_ready":
-        flags["sms_code_ready"] = True
-    elif phase:
-        flags["sms_code_ready"] = False
-    if phase in {"order_submitted", "awaiting_payment", "payment_confirmed", "orders_queried", "completed"}:
-        flags["order_submitted"] = True
-    if phase in {"payment_confirmed", "completed"}:
-        flags["payment_confirmed"] = True
-    if phase in {"amount_ready", "link_ready", "completed"} and workflow.get("scenario") == "recharge":
-        flags["recharge_ready"] = True
-    elif workflow.get("scenario") == "recharge" and phase:
-        flags["recharge_ready"] = False
-
-    inferred_task_id = _infer_current_task_id(entities)
-    if inferred_task_id and (not workflow["current_task_id"] or phase_changed):
-        workflow["current_task_id"] = inferred_task_id
-
-    if phase == "blocked":
-        workflow["blocked_reason"] = workflow["blocked_reason"] or "当前业务条件不足，暂不能继续"
-    elif phase_changed and previous and workflow["blocked_reason"] == str(previous.get("blocked_reason", "") or "").strip():
-        workflow["blocked_reason"] = ""
-        workflow["blocked_by"] = ""
-    elif phase != "handoff_required" and not workflow["blocked_reason"]:
-        workflow["blocked_by"] = ""
-
-    if phase != "handoff_required" and phase_changed and previous and workflow.get("requires_human_handoff") == bool(previous.get("requires_human_handoff")):
-        workflow["requires_human_handoff"] = False
-    else:
-        workflow["requires_human_handoff"] = bool(workflow.get("requires_human_handoff")) or phase == "handoff_required"
-    if phase_changed and previous and workflow["next_actions"] == _dedup_list(previous.get("next_actions", [])):
-        workflow["next_actions"] = []
-    if not workflow["next_actions"]:
-        workflow["next_actions"] = _default_next_actions(workflow["scenario"], phase)
-
-    if previous and previous.get("phase") != phase and phase in {"completed", "payment_confirmed"} and not workflow["service_channel"]:
-        workflow["service_channel"] = workflow.get("service_channel", "") or "线上客服"
+    workflow["history"] = _normalize_history(workflow.get("history", []))
+    if workflow["blocked_reason"] and not workflow["next_actions"]:
+        workflow["next_actions"] = ["向用户解释当前限制", "补齐信息后再继续"]
 
     return workflow
 

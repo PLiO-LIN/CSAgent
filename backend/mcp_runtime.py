@@ -167,6 +167,7 @@ class McpToolRuntime:
                 func=_executor,
                 scope=connection.config.scope,
                 policy=policy,
+                source=f"mcp:{connection.name}",
             )
             occupied_names.add(public_name)
         logger.info("MCP server %s discovered %s tools", connection.name, len(entries))

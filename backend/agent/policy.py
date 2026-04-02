@@ -47,41 +47,38 @@ class ToolPolicyDecision:
 
 def enrich_tool_args(entry: ToolEntry, args: dict | None, agent_state: dict, phone: str = "") -> dict:
     result = dict(args or {})
-    workflow = (agent_state.get("workflow_state") or {})
-    entities = workflow.get("entities") or {}
     accepted = entry.accepted_arg_names()
 
     if phone and (accepted is None or "phone" in accepted) and not result.get("phone"):
         result["phone"] = phone
 
-    for arg_name in accepted or []:
-        if result.get(arg_name) not in (None, "", [], {}):
-            continue
-        for entity_key in ENTITY_ARG_ALIASES.get(arg_name, [arg_name]):
-            value = entities.get(entity_key)
+    last_user_action = (agent_state.get("runtime_state") or {}).get("last_user_action")
+    if entry.name == "submit_order" and isinstance(last_user_action, dict):
+        for field in ["sms_code", "preview_id", "pay_mode", "product_id", "verification_seq"]:
+            if result.get(field) not in (None, "", [], {}):
+                continue
+            value = last_user_action.get(field)
             if value not in (None, "", [], {}):
-                result[arg_name] = deepcopy(value)
-                break
+                result[field] = deepcopy(value)
 
     return entry.sanitize_args(result)
 
 
 def build_tool_fingerprint(entry: ToolEntry, args: dict | None, agent_state: dict) -> str:
     policy = entry.policy
-    workflow = (agent_state.get("workflow_state") or {})
     fields = list(policy.idempotency_key_fields or [])
     if not fields and (policy.external_side_effect or entry.requires_confirmation()):
         fields = [
             key
-            for key in ["phone", "product_id", "order_id", "preview_id", "pay_mode"]
-            if _resolve_value(key, args or {}, workflow) not in (None, "", [], {})
+            for key in ["phone", "product_id", "order_id", "preview_id", "pay_mode", "amount", "month"]
+            if (args or {}).get(key) not in (None, "", [], {})
         ]
     if not fields:
         return ""
 
     parts = []
     for key in fields:
-        value = _resolve_value(key, args or {}, workflow)
+        value = (args or {}).get(key)
         if value in (None, "", [], {}):
             continue
         parts.append(f"{key}={_stable_text(value)}")
@@ -92,11 +89,7 @@ def build_tool_fingerprint(entry: ToolEntry, args: dict | None, agent_state: dic
 
 
 def evaluate_tool_policy(entry: ToolEntry, args: dict | None, agent_state: dict) -> ToolPolicyDecision:
-    workflow = (agent_state.get("workflow_state") or {})
     runtime = (agent_state.get("runtime_state") or {})
-    scenario = str(workflow.get("scenario", "") or "").strip()
-    phase = str(workflow.get("phase", "") or "").strip()
-    flags = workflow.get("flags") or {}
     policy = entry.policy
     resolved_args = deepcopy(args or {})
     last_user_action = runtime.get("last_user_action") if isinstance(runtime.get("last_user_action"), dict) else {}
@@ -114,16 +107,6 @@ def evaluate_tool_policy(entry: ToolEntry, args: dict | None, agent_state: dict)
     if entry.name == "submit_order":
         action_type = str(last_user_action.get("action", "") or "").strip()
         action_source = str(last_user_action.get("source", "") or "").strip()
-        order_id = str(((workflow.get("entities") or {}).get("order_id", "") or (workflow.get("entities") or {}).get("duplicate_order_id", "")).strip())
-        pay_status = str(((workflow.get("entities") or {}).get("pay_status", "") or "")).strip().upper()
-        continuing_existing_pending_order = bool(order_id and pay_status in {"PENDING", "待支付"} and phase in {"existing_order_found", "awaiting_payment", "orders_queried"})
-        if continuing_existing_pending_order:
-            return ToolPolicyDecision(
-                allow=True,
-                requires_confirmation=False,
-                fingerprint=fingerprint,
-                resolved_args=resolved_args,
-            )
         if action_type != "confirm_order_submit" or action_source != "card_action":
             reason = _join_reasons("最终下单只能通过验证码卡片上的确认按钮触发，不能直接使用自然语言确认")
             return _blocked_decision(
@@ -132,7 +115,6 @@ def evaluate_tool_policy(entry: ToolEntry, args: dict | None, agent_state: dict)
                 reason_code="card_confirmation_required",
                 reason=reason,
                 fallback_to_knowledge=False,
-                phase=phase,
             )
         if resolved_args.get("sms_code") in (None, "", [], {}):
             reason = _join_reasons("缺少验证码，请先在卡片中填写验证码后再点击确认下单")
@@ -142,62 +124,7 @@ def evaluate_tool_policy(entry: ToolEntry, args: dict | None, agent_state: dict)
                 reason_code="missing_sms_code",
                 reason=reason,
                 fallback_to_knowledge=False,
-                phase=phase,
             )
-
-    if policy.allowed_scenarios and scenario not in policy.allowed_scenarios:
-        reason = _join_reasons(
-            f"当前场景为 {scenario or '未识别'}，工具 {entry.name} 仅适用于 {', '.join(policy.allowed_scenarios)}"
-        )
-        return _blocked_decision(
-            entry,
-            resolved_args,
-            reason_code="scenario_mismatch",
-            reason=reason,
-            fallback_to_knowledge=policy.fallback_to_knowledge,
-            phase=phase,
-        )
-
-    if policy.allowed_phases and phase not in policy.allowed_phases:
-        reason = _join_reasons(
-            f"当前业务阶段为 {phase or '未建立'}，工具 {entry.name} 适用阶段为 {', '.join(policy.allowed_phases)}"
-        )
-        return _blocked_decision(
-            entry,
-            resolved_args,
-            reason_code="phase_mismatch",
-            reason=reason,
-            fallback_to_knowledge=policy.fallback_to_knowledge,
-            phase=phase,
-        )
-
-    missing_entities = [
-        key
-        for key in policy.required_entities
-        if _resolve_required_entity_value(key, resolved_args, workflow) in (None, "", [], {})
-    ]
-    if missing_entities:
-        reason = _join_reasons(f"缺少必要业务实体: {', '.join(missing_entities)}")
-        return _blocked_decision(
-            entry,
-            resolved_args,
-            reason_code="missing_entities",
-            reason=reason,
-            fallback_to_knowledge=policy.fallback_to_knowledge,
-            phase=phase,
-        )
-
-    missing_flags = [key for key in policy.required_flags if not flags.get(key)]
-    if missing_flags:
-        reason = _join_reasons(f"当前状态尚未满足标记条件: {', '.join(missing_flags)}")
-        return _blocked_decision(
-            entry,
-            resolved_args,
-            reason_code="missing_flags",
-            reason=reason,
-            fallback_to_knowledge=policy.fallback_to_knowledge,
-            phase=phase,
-        )
 
     pending = agent_state.get("pending_confirmation") or {}
     if pending and policy.external_side_effect:
@@ -211,7 +138,6 @@ def evaluate_tool_policy(entry: ToolEntry, args: dict | None, agent_state: dict)
                 reason_code="pending_conflict",
                 reason=reason,
                 fallback_to_knowledge=False,
-                phase=phase,
             )
 
     if fingerprint and (policy.external_side_effect or entry.requires_confirmation()):
@@ -249,7 +175,6 @@ def _blocked_decision(
     reason_code: str,
     reason: str,
     fallback_to_knowledge: bool,
-    phase: str,
 ) -> ToolPolicyDecision:
     next_actions = ["先补齐关键信息", "再继续当前客服流程"]
     fallback_tool = "search_knowledge" if fallback_to_knowledge else ""
@@ -270,7 +195,6 @@ def _blocked_decision(
             "blocked_reason": reason,
             "blocked_by": entry.name,
             "next_actions": next_actions,
-            "phase": phase or "intent_collected",
         },
         history_entry={"kind": "tool_policy", "summary": f"{entry.name} 被策略阻止：{reason_code}"},
     )
