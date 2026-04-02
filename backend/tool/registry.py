@@ -21,7 +21,6 @@ def ensure_local_tools_loaded() -> None:
     global _local_tools_loaded
     if _local_tools_loaded:
         return
-    from tool import list_skills as _list_skills  # noqa: F401
     from tool import list_tools as _list_tools  # noqa: F401
     from tool import load_skills as _load_skills  # noqa: F401
 

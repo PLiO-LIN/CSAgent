@@ -29,7 +29,6 @@ function uid() {
 const TOOL_LABELS: Record<string, string> = {
   load_skills: '加载技能',
   list_tools: '查看工具',
-  list_skills: '查看技能',
 }
 
 export function toolLabel(name: string) {
@@ -41,11 +40,27 @@ export function toolLabel(name: string) {
     .join(' ')
 }
 
+export interface UseChatController {
+  messages: ChatMessage[]
+  loading: boolean
+  sessionId: string
+  phone: string
+  agentId: string
+  entityAliases: EntityAliases
+  setPhone: (value: string) => void
+  setAgentId: (value: string) => void
+  send: (input: ChatSendInput) => Promise<void>
+  stop: () => void
+  reset: () => void
+  toggle: (msgId: string, idx: number) => void
+}
+
 export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(false)
   const [sessionId, setSessionId] = useState('')
   const [phone, setPhone] = useState('')
+  const [agentId, setAgentId] = useState('')
   const [entityAliases, setEntityAliases] = useState<EntityAliases>({})
   const cur = useRef<ChatMessage | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -276,7 +291,7 @@ export function useChat() {
       const resp = await fetch('/api/chat/sse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId, content, phone, client_meta: clientMeta }),
+        body: JSON.stringify({ session_id: sessionId, content, phone, agent_id: agentId, client_meta: clientMeta }),
         signal: ctrl.signal,
       })
 
@@ -325,7 +340,7 @@ export function useChat() {
         setLoading(false)
       }
     }
-  }, [sessionId, loading, phone, finishStreamingMessage])
+  }, [sessionId, loading, phone, agentId, finishStreamingMessage])
 
   const reset = useCallback(() => {
     abortRef.current?.abort()
@@ -344,5 +359,5 @@ export function useChat() {
     }))
   }, [])
 
-  return { messages, loading, sessionId, phone, entityAliases, setPhone, send, stop, reset, toggle }
+  return { messages, loading, sessionId, phone, agentId, entityAliases, setPhone, setAgentId, send, stop, reset, toggle }
 }

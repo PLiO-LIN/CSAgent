@@ -11,6 +11,7 @@ backend/.mypy_cache/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/*.tsbuildinfo
 .DS_Store
 .idea/
 .vscode/

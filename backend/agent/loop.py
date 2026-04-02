@@ -291,7 +291,7 @@ async def _log_agent_event(
 
 async def run(
     db: AsyncSession,
-    provider: Provider,
+    provider: Provider | None,
     session_id: str,
     skill_name: str = "",
     phone: str = "",
@@ -300,13 +300,17 @@ async def run(
     step = 0
     compacted = False
     last_tool_policy_warning = ""
-    provider_name = str(getattr(provider, "name", "") or provider.__class__.__name__).strip()
     session = await crud.get_session(db, session_id)
     session_metadata = session.metadata_ if session and session.metadata_ else {}
     agent_state = load_agent_state(session_metadata)
     selected_agent_id = str(agent_id or session_metadata.get("agent_id") or "").strip()
     agent_runtime = resolve_agent_runtime(selected_agent_id)
     selected_agent_id = agent_runtime.agent_id
+    if provider is None or agent_runtime.model_settings:
+        from provider import factory
+
+        provider = factory.create(agent_runtime.model_settings)
+    provider_name = str(getattr(provider, "name", "") or provider.__class__.__name__).strip()
 
     if str(session_metadata.get("agent_id") or "").strip() != selected_agent_id:
         await crud.update_session_metadata(db, session_id, {"agent_id": selected_agent_id})
@@ -507,7 +511,7 @@ async def run(
                             "content": summary,
                             "metadata": metadata,
                         }
-                    ])
+                    ], agent=selected_agent_id)
                     yield Event("summary", text="已完成上下文总结，后续回复将基于压缩摘要继续。")
                     update_workflow_state(
                         agent_state,
@@ -710,7 +714,7 @@ async def run(
                 yield Event("error", text=provider_error_text)
                 await crud.add_message(db, session_id, "assistant", [
                     {"type": "text", "content": f"[错误] {provider_error_text}"}
-                ], model=provider.model)
+                ], agent=selected_agent_id, model=provider.model)
                 return
 
             if tool_calls:
@@ -765,6 +769,7 @@ async def run(
             if parts:
                 assistant_msg = await crud.add_message(
                     db, session_id, "assistant", parts,
+                    agent=selected_agent_id,
                     model=provider.model,
                     tokens=(input_tokens, output_tokens),
                 )

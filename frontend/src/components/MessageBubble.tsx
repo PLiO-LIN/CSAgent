@@ -111,7 +111,7 @@ export default function MessageBubble({ message, toggle, send, entityAliases }: 
   if (message.role === 'summary') {
     return (
       <div className="mb-4 flex justify-center">
-        <div className="studio-inner-panel w-full max-w-[85%] rounded-[22px] border-[rgba(15,111,255,0.12)] bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(236,244,255,0.98))] px-4 py-3 shadow-[0_12px_28px_rgba(13,63,145,0.08)]">
+        <div className="studio-inner-panel w-full max-w-[85%] rounded-[22px] border-[rgba(46,163,125,0.12)] bg-[linear-gradient(135deg,rgba(255,255,255,0.98),rgba(244,252,248,0.98))] px-4 py-3 shadow-[0_12px_28px_rgba(15,23,42,0.05)]">
           <div className="flex items-center gap-2 text-sm font-medium text-[var(--studio-blue-700)]">
             <Brain size={14} />
             <span>上下文已总结</span>
@@ -127,7 +127,7 @@ export default function MessageBubble({ message, toggle, send, entityAliases }: 
   if (message.role === 'status') {
     return (
       <div className="flex justify-center my-2">
-        <div className="inline-flex items-center gap-1.5 rounded-full border border-[rgba(15,111,255,0.08)] bg-white/86 px-3 py-1 text-xs text-slate-500 shadow-[0_8px_20px_rgba(13,63,145,0.06)]">
+        <div className="inline-flex items-center gap-1.5 rounded-full border border-[rgba(46,163,125,0.08)] bg-white/92 px-3 py-1 text-xs text-slate-500 shadow-[0_8px_20px_rgba(15,23,42,0.04)]">
           <Info size={12} />
           <span>{applyEntityAliases(message.content, entityAliases)}</span>
         </div>
@@ -140,11 +140,11 @@ export default function MessageBubble({ message, toggle, send, entityAliases }: 
   if (isUser) {
     return (
       <div className="flex gap-3 flex-row-reverse mb-4">
-        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#0b4ea8,#0f6fff)] shadow-[0_12px_26px_rgba(15,111,255,0.24)]">
+        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-2xl bg-emerald-500 shadow-[0_10px_22px_rgba(46,163,125,0.22)]">
           <User size={16} className="text-white" />
         </div>
         <div className="max-w-[75%]">
-          <div className="rounded-[22px] rounded-tr-sm border border-[rgba(255,255,255,0.28)] bg-[linear-gradient(135deg,#0c56c7_0%,#0f6fff_55%,#54afff_100%)] px-4 py-3 text-sm leading-relaxed text-white shadow-[0_16px_30px_rgba(15,111,255,0.2)]">
+          <div className="rounded-[22px] rounded-tr-sm border border-emerald-100 bg-[linear-gradient(135deg,#f2fbf7_0%,#e7f7f0_100%)] px-4 py-3 text-sm leading-relaxed text-slate-800 shadow-[0_12px_24px_rgba(15,23,42,0.05)]">
             {applyEntityAliases(message.content, entityAliases)}
           </div>
         </div>
@@ -163,7 +163,7 @@ export default function MessageBubble({ message, toggle, send, entityAliases }: 
       <div className={`overflow-hidden rounded-[20px] border ${
         t.status === 'error'
           ? 'border-rose-200 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,243,244,0.94))]'
-          : 'border-[rgba(15,111,255,0.10)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(241,247,255,0.95))]'
+          : 'border-[rgba(46,163,125,0.10)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(245,251,248,0.96))]'
       }`}>
         <button
           onClick={() => toggle(message.id, toolIndex)}
@@ -178,8 +178,8 @@ export default function MessageBubble({ message, toggle, send, entityAliases }: 
           <span className="flex items-center gap-2 text-slate-400">
             <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${
               t.status === 'error' ? 'bg-rose-100 text-rose-600'
-              : t.status === 'done' ? 'bg-[rgba(15,111,255,0.12)] text-[var(--studio-blue-600)]'
-              : 'bg-[rgba(15,111,255,0.10)] text-[var(--studio-blue-500)]'
+              : t.status === 'done' ? 'bg-[rgba(46,163,125,0.12)] text-[var(--studio-blue-600)]'
+              : 'bg-[rgba(46,163,125,0.10)] text-[var(--studio-blue-500)]'
             }`}>
               {t.status === 'calling' ? '调用中' : t.status === 'executing' ? '执行中' : t.status === 'done' ? '完成' : '失败'}
             </span>
@@ -187,17 +187,17 @@ export default function MessageBubble({ message, toggle, send, entityAliases }: 
           </span>
         </button>
         {t.expanded && (
-          <div className="space-y-2 border-t border-[rgba(15,111,255,0.08)] bg-white/92 px-3 py-2">
+          <div className="space-y-2 border-t border-[rgba(46,163,125,0.08)] bg-white/92 px-3 py-2">
             {t.input && (
               <div>
                 <div className="mb-1 text-[10px] text-slate-400">调用参数</div>
-                <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all rounded-xl border border-[rgba(15,111,255,0.08)] bg-[rgba(240,247,255,0.92)] p-2 text-[11px] text-slate-600">{applyEntityAliases(t.input, entityAliases)}</pre>
+                <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all rounded-xl border border-[rgba(46,163,125,0.08)] bg-[rgba(245,251,248,0.96)] p-2 text-[11px] text-slate-600">{applyEntityAliases(t.input, entityAliases)}</pre>
               </div>
             )}
             {t.output && (
               <div>
                 <div className="mb-1 text-[10px] text-slate-400">返回结果</div>
-                <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-xl border border-[rgba(15,111,255,0.08)] bg-[rgba(240,247,255,0.92)] p-2 text-[11px] text-slate-600">{applyEntityAliases(t.output, entityAliases)}</pre>
+                <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-xl border border-[rgba(46,163,125,0.08)] bg-[rgba(245,251,248,0.96)] p-2 text-[11px] text-slate-600">{applyEntityAliases(t.output, entityAliases)}</pre>
               </div>
             )}
           </div>
@@ -208,13 +208,13 @@ export default function MessageBubble({ message, toggle, send, entityAliases }: 
 
   return (
     <div className="flex gap-3 mb-4">
-      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#0a4da8,#0f6fff)] shadow-[0_12px_24px_rgba(15,111,255,0.2)]">
-        <span className="text-white text-xs font-bold">AI</span>
+      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-2xl bg-emerald-100 shadow-[0_10px_20px_rgba(15,23,42,0.04)]">
+        <span className="text-emerald-700 text-xs font-bold">AI</span>
       </div>
       <div className="max-w-[85%] min-w-0 space-y-2">
         {/* 思考内容 - 可折叠 */}
         {hasThinking && (
-          <div className="overflow-hidden rounded-[20px] border border-[rgba(15,111,255,0.10)] bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(237,245,255,0.92))]">
+          <div className="overflow-hidden rounded-[20px] border border-[rgba(46,163,125,0.10)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(245,251,248,0.96))]">
             <button
               onClick={() => setThinkOpen(!thinkOpen)}
               className="flex w-full items-center gap-2 px-3 py-2 text-xs text-[var(--studio-blue-600)] transition-colors hover:bg-white/50"
@@ -245,7 +245,7 @@ export default function MessageBubble({ message, toggle, send, entityAliases }: 
           return (
             <div
               key={`c-${gi}`}
-              className={`rounded-[24px] rounded-tl-sm border border-[rgba(15,111,255,0.10)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(241,247,255,0.96))] px-4 py-3 text-sm leading-relaxed text-slate-700 shadow-[0_14px_28px_rgba(13,63,145,0.07)] ${isLast && message.streaming ? 'typing-cursor' : ''}`}
+              className={`rounded-[24px] rounded-tl-sm border border-[rgba(46,163,125,0.10)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,252,250,0.98))] px-4 py-3 text-sm leading-relaxed text-slate-700 shadow-[0_12px_24px_rgba(15,23,42,0.05)] ${isLast && message.streaming ? 'typing-cursor' : ''}`}
             >
               {segs.map((seg, si) => {
                 if (seg.type === 'card' && (seg as any).card) {

@@ -10,10 +10,11 @@ CONFIG_FILE = BACKEND_DIR / "config.yaml"
 
 
 def _coerce_text_list(value: Any) -> list[str]:
-    if value in {None, ""}:
+    if value is None:
         return []
     if isinstance(value, str):
-        return [value]
+        text = value.strip()
+        return [text] if text else []
     if isinstance(value, (list, tuple, set)):
         return [str(item or "").strip() for item in value if str(item or "").strip()]
     return [str(value).strip()] if str(value).strip() else []
@@ -115,12 +116,44 @@ class McpServerSettings(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+class LlmModelSettings(BaseModel):
+    model_id: str = ""
+    display_name: str = ""
+    chat_model: str = ""
+    enabled: bool = True
+
+    @field_validator("model_id", "display_name", "chat_model", mode="before")
+    @classmethod
+    def normalize_text_field(cls, value: Any) -> str:
+        return str(value or "").strip()
+
+    model_config = {"extra": "ignore"}
+
+
+class LlmVendorSettings(BaseModel):
+    vendor_id: str = ""
+    display_name: str = ""
+    base_url: str = ""
+    enabled: bool = True
+    models: list[LlmModelSettings] = Field(default_factory=list)
+
+    @field_validator("vendor_id", "display_name", "base_url", mode="before")
+    @classmethod
+    def normalize_text_field(cls, value: Any) -> str:
+        return str(value or "").strip()
+
+    model_config = {"extra": "ignore"}
+
+
 class Settings(BaseModel):
     # SiliconFlow
     api_key: str = ""
     base_url: str = "https://api.siliconflow.cn/v1"
     chat_model: str = "Qwen/Qwen3-32B"
     embed_model: str = "BAAI/bge-m3"
+    llm_active_vendor: str = ""
+    llm_active_model: str = ""
+    llm_vendors: list[LlmVendorSettings] = Field(default_factory=list)
 
     # 数据库
     database_url: str = "sqlite+aiosqlite:///./csagent.db"
@@ -188,6 +221,9 @@ def _nest_yaml_sections(data: dict) -> dict:
             "base_url": data.get("base_url", "https://api.siliconflow.cn/v1"),
             "chat_model": data.get("chat_model", "Qwen/Qwen3-32B"),
             "embed_model": data.get("embed_model", "BAAI/bge-m3"),
+            "active_vendor": data.get("llm_active_vendor", ""),
+            "active_model": data.get("llm_active_model", ""),
+            "vendors": data.get("llm_vendors", []),
         },
         "database": {
             "url": _display_database_url(data.get("database_url", "sqlite+aiosqlite:///./csagent.db")),
@@ -237,6 +273,12 @@ def _flatten_yaml_sections(data: dict) -> dict:
             flat["chat_model"] = llm.get("chat_model")
         if "embed_model" in llm:
             flat["embed_model"] = llm.get("embed_model")
+        if "active_vendor" in llm:
+            flat["llm_active_vendor"] = llm.get("active_vendor")
+        if "active_model" in llm:
+            flat["llm_active_model"] = llm.get("active_model")
+        if "vendors" in llm:
+            flat["llm_vendors"] = llm.get("vendors")
 
     database = data.get("database")
     if isinstance(database, dict) and "url" in database:
@@ -334,6 +376,10 @@ def _render_yaml(data: dict) -> str:
         f"  chat_model: {_yaml_scalar(data.get('chat_model', 'Qwen/Qwen3-32B'))}",
         "  # 向量模型名。知识检索建索引和查询时使用。",
         f"  embed_model: {_yaml_scalar(data.get('embed_model', 'BAAI/bge-m3'))}",
+        f"  active_vendor: {_yaml_scalar(data.get('llm_active_vendor', ''))}",
+        f"  active_model: {_yaml_scalar(data.get('llm_active_model', ''))}",
+        "  vendors:",
+        *_yaml_block(data.get('llm_vendors', []) or [], 4),
         "",
         "database:",
         "  # 数据库连接串。相对 SQLite 路径会归一化到项目根目录。",
@@ -405,3 +451,163 @@ def _load_settings_data() -> dict:
 
 
 settings = Settings.model_validate(_load_settings_data())
+
+
+def get_settings_snapshot() -> Settings:
+    return Settings.model_validate(_load_settings_data())
+
+
+def sync_runtime_settings(updated: Settings) -> Settings:
+    for key in updated.__class__.model_fields:
+        value = getattr(updated, key)
+        setattr(settings, key, value)
+    return settings
+
+
+def patch_settings(patch: dict[str, Any] | None = None, preserve_blank_fields: set[str] | None = None) -> Settings:
+    current = _load_settings_data()
+    preserve_blank_fields = set(preserve_blank_fields or set())
+    next_data = dict(current)
+    for key, value in (patch or {}).items():
+        if value is None:
+            continue
+        if key in preserve_blank_fields and isinstance(value, str) and not value.strip():
+            continue
+        next_data[key] = value
+    updated = Settings.model_validate(next_data)
+    _write_yaml(CONFIG_FILE, updated.model_dump())
+    return sync_runtime_settings(updated)
+
+
+def _coerce_llm_vendor_settings(raw_vendors: Any) -> list[LlmVendorSettings]:
+    vendors: list[LlmVendorSettings] = []
+    for item in (raw_vendors or []):
+        if isinstance(item, LlmVendorSettings):
+            vendors.append(item.model_copy(deep=True))
+            continue
+        vendors.append(LlmVendorSettings.model_validate(item))
+    return vendors
+
+
+def _coerce_mcp_server_map(raw_servers: Any) -> dict[str, McpServerSettings]:
+    servers: dict[str, McpServerSettings] = {}
+    if not isinstance(raw_servers, dict):
+        return servers
+    for name, config in raw_servers.items():
+        key = str(name or "").strip()
+        if not key:
+            continue
+        if isinstance(config, McpServerSettings):
+            servers[key] = config.model_copy(deep=True)
+            continue
+        servers[key] = McpServerSettings.model_validate(config)
+    return servers
+
+
+def get_llm_catalog(source: Settings | None = None) -> tuple[list[LlmVendorSettings], str, str]:
+    current = source or settings
+    vendors = _coerce_llm_vendor_settings(current.llm_vendors or [])
+    active_vendor = str(current.llm_active_vendor or "").strip()
+    active_model = str(current.llm_active_model or "").strip()
+
+    if vendors and not active_vendor:
+        first_vendor = next((item for item in vendors if item.enabled), vendors[0])
+        active_vendor = first_vendor.vendor_id
+        if not active_model and first_vendor.models:
+            first_model = next((item for item in first_vendor.models if item.enabled), first_vendor.models[0])
+            active_model = first_model.model_id
+
+    current_base_url = str(current.base_url or "").strip()
+    current_chat_model = str(current.chat_model or "").strip()
+    if current_base_url or current_chat_model:
+        vendor = next((item for item in vendors if item.vendor_id == active_vendor), None)
+        if vendor is None:
+            vendor = LlmVendorSettings(
+                vendor_id=active_vendor or "default",
+                display_name=active_vendor or "默认厂商",
+                base_url=current_base_url,
+                enabled=True,
+                models=[],
+            )
+            vendors.append(vendor)
+        if not vendor.base_url:
+            vendor.base_url = current_base_url
+        if not active_vendor:
+            active_vendor = vendor.vendor_id
+
+        model = next((item for item in vendor.models if item.model_id == active_model), None)
+        if model is None:
+            fallback_model_id = active_model or current_chat_model or "default-model"
+            model = LlmModelSettings(
+                model_id=fallback_model_id,
+                display_name=fallback_model_id,
+                chat_model=current_chat_model or fallback_model_id,
+                enabled=True,
+            )
+            vendor.models.append(model)
+        elif not model.chat_model:
+            model.chat_model = current_chat_model or model.model_id
+        if not active_model:
+            active_model = model.model_id
+
+    return vendors, active_vendor, active_model
+
+
+def resolve_llm_selection(model_settings: dict[str, Any] | None = None, source: Settings | None = None) -> dict[str, str]:
+    current = source or settings
+    settings_map = dict(model_settings or {})
+    vendors, default_vendor_id, default_model_id = get_llm_catalog(current)
+    selected_vendor_id = str(settings_map.get("vendor_id") or default_vendor_id or "").strip()
+    selected_model_id = str(settings_map.get("model_id") or default_model_id or "").strip()
+
+    vendor = next((item for item in vendors if item.vendor_id == selected_vendor_id), None)
+    if vendor is None and vendors:
+        vendor = next((item for item in vendors if item.enabled), vendors[0])
+        selected_vendor_id = vendor.vendor_id
+
+    model = None
+    if vendor:
+        model = next((item for item in vendor.models if item.model_id == selected_model_id), None)
+        if model is None and vendor.models:
+            model = next((item for item in vendor.models if item.enabled), vendor.models[0])
+            selected_model_id = model.model_id
+
+    base_url = str(settings_map.get("base_url") or (vendor.base_url if vendor else "") or current.base_url or "").strip()
+    chat_model = str(settings_map.get("chat_model") or (model.chat_model if model else "") or current.chat_model or "").strip()
+
+    return {
+        "vendor_id": selected_vendor_id,
+        "model_id": selected_model_id,
+        "base_url": base_url,
+        "chat_model": chat_model,
+        "api_key": str(current.api_key or "").strip(),
+    }
+
+
+def get_model_config_payload(source: Settings | None = None) -> dict[str, Any]:
+    current = source or settings
+    vendors, active_vendor, active_model = get_llm_catalog(current)
+    return {
+        "provider": "openai_compatible",
+        "has_api_key": bool(str(current.api_key or "").strip()),
+        "base_url": current.base_url,
+        "chat_model": current.chat_model,
+        "embed_model": current.embed_model,
+        "active_vendor": active_vendor,
+        "active_model": active_model,
+        "vendors": [vendor.model_dump() for vendor in vendors],
+        "database_url": _display_database_url(current.database_url),
+    }
+
+
+def get_mcp_config_payload(source: Settings | None = None) -> dict[str, Any]:
+    current = source or settings
+    servers = _coerce_mcp_server_map(current.mcp_servers or {})
+    return {
+        "enabled": bool(current.mcp_enabled),
+        "tool_timeout_seconds": float(current.mcp_tool_timeout_seconds or 0.0),
+        "servers": {
+            name: config.model_dump()
+            for name, config in servers.items()
+        },
+    }

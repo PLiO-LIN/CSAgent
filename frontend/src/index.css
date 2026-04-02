@@ -4,21 +4,21 @@
 
 :root {
   color-scheme: light;
-  --studio-blue-50: #f4f8ff;
-  --studio-blue-100: #e3efff;
-  --studio-blue-200: #c9deff;
-  --studio-blue-300: #9fc6ff;
-  --studio-blue-400: #72aeff;
-  --studio-blue-500: #0f6fff;
-  --studio-blue-600: #0b60e0;
-  --studio-blue-700: #0b4ea8;
-  --studio-blue-800: #0a356c;
-  --studio-ink-900: #0d1f3b;
-  --studio-ink-700: #355178;
-  --studio-line: rgba(15, 111, 255, 0.12);
-  --studio-line-strong: rgba(15, 111, 255, 0.22);
+  --studio-blue-50: #f5fbf8;
+  --studio-blue-100: #e7f7f0;
+  --studio-blue-200: #cdeede;
+  --studio-blue-300: #a7dfc7;
+  --studio-blue-400: #72c7a4;
+  --studio-blue-500: #2ea37d;
+  --studio-blue-600: #228569;
+  --studio-blue-700: #1c6a54;
+  --studio-blue-800: #18493b;
+  --studio-ink-900: #17212f;
+  --studio-ink-700: #4b5b68;
+  --studio-line: rgba(46, 163, 125, 0.12);
+  --studio-line-strong: rgba(46, 163, 125, 0.22);
   --studio-surface: rgba(255, 255, 255, 0.86);
-  --studio-shadow: 0 24px 60px rgba(13, 63, 145, 0.16);
+  --studio-shadow: 0 24px 60px rgba(15, 23, 42, 0.08);
 }
 
 html, body, #root {
@@ -31,9 +31,9 @@ html, body, #root {
 body {
   color: var(--studio-ink-900);
   background:
-    radial-gradient(circle at top left, rgba(71, 150, 255, 0.18), transparent 28%),
-    radial-gradient(circle at top right, rgba(11, 96, 224, 0.16), transparent 34%),
-    linear-gradient(180deg, #f4f8ff 0%, #eef5ff 46%, #e7f0fe 100%);
+    radial-gradient(circle at top left, rgba(114, 199, 164, 0.18), transparent 28%),
+    radial-gradient(circle at top right, rgba(205, 238, 222, 0.46), transparent 34%),
+    linear-gradient(180deg, #f7fcfa 0%, #f3faf7 46%, #edf7f2 100%);
 }
 
 body::before {
@@ -41,9 +41,9 @@ body::before {
   position: fixed;
   inset: 0;
   background-image:
-    linear-gradient(rgba(15, 111, 255, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(15, 111, 255, 0.04) 1px, transparent 1px);
-  background-size: 32px 32px;
+    linear-gradient(rgba(46, 163, 125, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(46, 163, 125, 0.025) 1px, transparent 1px);
+  background-size: 40px 40px;
   mask-image: linear-gradient(180deg, rgba(255, 255, 255, 0.8), transparent 78%);
   pointer-events: none;
 }
@@ -52,7 +52,7 @@ body::after {
   content: '';
   position: fixed;
   inset: 0;
-  background: radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.76), transparent 54%);
+  background: radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.88), transparent 54%);
   pointer-events: none;
 }
 
@@ -87,7 +87,7 @@ body::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.76), rgba(223, 236, 255, 0.42));
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(231, 247, 240, 0.48));
   pointer-events: none;
 }
 

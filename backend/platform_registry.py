@@ -178,6 +178,96 @@ def _record_from_agent_model(model: PlatformAgentModel) -> PlatformAgentRecord:
     )
 
 
+def _default_global_tool_names() -> list[str]:
+    return [
+        item.tool_name
+        for item in list_tool_records(include_disabled=False)
+        if item.enabled and item.scope == "global" and item.provider_type != "mcp"
+    ]
+
+
+def _default_skill_names() -> list[str]:
+    return [item.skill_name for item in list_skill_records(include_disabled=False, scoped=False)]
+
+
+def _default_memory_config(profile: Any) -> dict[str, Any]:
+    return {
+        "enabled": bool(profile.long_term_memory.enabled),
+        "top_k": int(profile.long_term_memory.top_k or 0),
+    }
+
+
+def _reconcile_default_agent_model(model: PlatformAgentModel, profile: Any, now: float) -> bool:
+    changed = False
+
+    if not str(model.name or "").strip():
+        model.name = "默认客服智能体"
+        changed = True
+    if not str(model.description or "").strip():
+        model.description = "平台默认 Agent"
+        changed = True
+    if not bool(model.enabled):
+        model.enabled = True
+        changed = True
+    if not bool(model.published):
+        model.published = True
+        changed = True
+    if not bool(model.is_default):
+        model.is_default = True
+        changed = True
+
+    if not str(model.system_core_prompt or "").strip():
+        model.system_core_prompt = profile.prompts.system_core
+        changed = True
+    if not str(model.summary_prompt or "").strip():
+        model.summary_prompt = profile.prompts.compaction
+        changed = True
+    if not str(model.memory_prompt or "").strip():
+        model.memory_prompt = profile.long_term_memory.prompt
+        changed = True
+
+    skill_guide_prompt = str(model.skill_guide_prompt or "")
+    if not skill_guide_prompt.strip() or "list_skills" in skill_guide_prompt:
+        model.skill_guide_prompt = profile.prompts.skill_guide
+        changed = True
+
+    allowed_global_tool_names = set(_default_global_tool_names())
+    current_global_tool_names = _dedupe_text_list(model.global_tool_names or [])
+    normalized_global_tool_names = [name for name in current_global_tool_names if name in allowed_global_tool_names]
+    if not normalized_global_tool_names:
+        normalized_global_tool_names = _default_global_tool_names()
+    if normalized_global_tool_names != current_global_tool_names:
+        model.global_tool_names = normalized_global_tool_names
+        changed = True
+
+    allowed_skill_names = set(_default_skill_names())
+    current_skill_names = _dedupe_text_list(model.skill_names or [])
+    normalized_skill_names = [name for name in current_skill_names if name in allowed_skill_names]
+    if normalized_skill_names != current_skill_names:
+        model.skill_names = normalized_skill_names
+        changed = True
+
+    memory_config = dict(model.memory_config or {})
+    normalized_memory_config = _default_memory_config(profile)
+    if not isinstance(memory_config.get("enabled"), bool):
+        memory_config["enabled"] = normalized_memory_config["enabled"]
+    if not isinstance(memory_config.get("top_k"), int):
+        memory_config["top_k"] = normalized_memory_config["top_k"]
+    if memory_config != dict(model.memory_config or {}):
+        model.memory_config = memory_config
+        changed = True
+
+    metadata = dict(model.metadata_ or {})
+    if metadata.get("managed_by") != "platform_default_agent":
+        metadata["managed_by"] = "platform_default_agent"
+        model.metadata_ = metadata
+        changed = True
+
+    if changed:
+        model.updated_at = now
+    return changed
+
+
 async def refresh_registry_cache(db: AsyncSession) -> None:
     tool_rows = await db.execute(select(PlatformToolModel))
     skill_rows = await db.execute(select(PlatformSkillModel))
@@ -306,17 +396,20 @@ async def remove_seed_skills_from_registry(db: AsyncSession) -> list[str]:
 async def ensure_default_agent(db: AsyncSession) -> PlatformAgentRecord:
     await refresh_registry_cache(db)
     now = time.time()
+    profile = load_framework_profile()
     existing = next((item for item in _agent_cache.values() if item.is_default), None)
     if existing:
-        return existing
+        if existing.agent_id != "default":
+            return existing
+        model = await db.get(PlatformAgentModel, existing.agent_id)
+        if model is not None and _reconcile_default_agent_model(model, profile, now):
+            db.add(model)
+            await db.commit()
+            await refresh_registry_cache(db)
+        return _agent_cache.get(existing.agent_id, existing)
 
-    profile = load_framework_profile()
-    global_tool_names = [
-        item.tool_name
-        for item in list_tool_records(include_disabled=False)
-        if item.enabled and item.scope == "global" and item.provider_type != "mcp"
-    ]
-    skill_names = [item.skill_name for item in list_skill_records(include_disabled=False, scoped=False)]
+    global_tool_names = _default_global_tool_names()
+    skill_names = _default_skill_names()
     model = PlatformAgentModel(
         agent_id="default",
         name="默认客服智能体",
@@ -333,8 +426,8 @@ async def ensure_default_agent(db: AsyncSession) -> PlatformAgentRecord:
         skill_names=skill_names,
         model_config={},
         tool_policy_config={},
-        memory_config={"enabled": bool(profile.long_term_memory.enabled), "top_k": int(profile.long_term_memory.top_k or 0)},
-        metadata_={},
+        memory_config=_default_memory_config(profile),
+        metadata_={"managed_by": "platform_default_agent"},
         created_at=now,
         updated_at=now,
     )

@@ -1,53 +1,98 @@
-app:
-  name: CSAgent
-  version: 0.2.0
-  mode: native_core
-
-server:
-  host: 0.0.0.0
-  port: 8200
-  cors_origins:
-    - http://127.0.0.1:3000
-    - http://localhost:3000
-    - http://127.0.0.1:5173
-    - http://localhost:5173
+# backend/config.yaml
+# 唯一配置入口。修改后请重启后端服务。
 
 llm:
-  provider: openai_compatible
-  api_key: ""
+  # 大模型 API Key。不要提交到版本库。
+  api_key: ''
+  # OpenAI 兼容接口地址。SiliconFlow 默认使用该地址。
   base_url: https://api.siliconflow.cn/v1
-  chat_model: Qwen/Qwen3-32B
+  # 主对话模型名。聊天回复、工具调用和总结都会使用它。
+  chat_model: Qwen/Qwen3.5-27B
+  # 向量模型名。知识检索建索引和查询时使用。
   embed_model: BAAI/bge-m3
+  active_vendor: default
+  active_model: Qwen/Qwen3.5-27B
+  vendors:
+    - vendor_id: default
+      display_name: 默认厂商
+      base_url: https://api.siliconflow.cn/v1
+      enabled: true
+      models:
+      - model_id: Qwen/Qwen3-32B
+        display_name: Qwen/Qwen3-32B
+        chat_model: Qwen/Qwen3-32B
+        enabled: true
+      - model_id: Qwen/Qwen3.5-27B
+        display_name: Qwen/Qwen3.5-27B
+        chat_model: Qwen/Qwen3.5-27B
+        enabled: true
 
 database:
+  # 数据库连接串。相对 SQLite 路径会归一化到项目根目录。
   url: sqlite+aiosqlite:///./csagent.db
 
 agent:
+  # 单轮 Agent 最多可执行多少个 step；达到后会停止继续调用工具。
   max_steps: 30
+  # 单个工具结果最多保留多少字符进入上下文，超过后会自动截断。
   max_tool_output: 16000
 
 context:
+  # 进入模型前的总上下文预算；超过后会先做局部瘦身，仍不足再触发总结。
   budget_tokens: 28000
+  # 给模型输出预留的 token 空间，避免上下文占满窗口。
   output_reserve_tokens: 4000
+  # 粗估上下文超过该值时，优先对旧工具结果做局部瘦身。
   local_thin_trigger_tokens: 18000
+  # 被局部瘦身的旧工具结果最多保留多少字符。
   local_tool_chars: 1200
+  # 被局部瘦身的旧 assistant 内容最多保留多少字符。
   local_assistant_chars: 1000
+  # 无论是否瘦身，都完整保留最近多少条消息。
   local_keep_messages: 14
+  # 无论是否瘦身，都完整保留最近多少条 tool 消息。
   local_recent_tool_messages: 4
 
 summary:
+  # 用户对话超过多少轮后触发总结；设为 0 表示不按轮数触发。
   trigger_turns: 0
+  # 上下文粗估 token 超过多少后触发总结；设为 0 表示不按长度触发。
   trigger_context_tokens: 80000
+  # 总结完成后，除摘要外额外保留最近多少轮原始对话。
   keep_recent_turns: 2
+  # 生成总结时最多截取多少字符作为对话摘录发给模型。
   excerpt_chars: 60000
+  # 总结里最多保留多少条最近工具结果摘要。
   recent_tool_limit: 6
+  # 总结调用最多允许模型输出多少 token。
   max_output_tokens: 2000
 
 mcp:
-  enabled: false
-  tool_timeout_seconds: 60
-  servers: {}
+  enabled: true
+  tool_timeout_seconds: 60.0
+  servers:
+    smoke_fastmcp:
+      enabled: true
+      transport: stdio
+      command: python
+      args:
+      - smoke_fastmcp_server.py
+      env: {}
+      cwd: backend
+      url: ''
+      headers: {}
+      timeout_seconds: 30.0
+      sse_read_timeout_seconds: 300.0
+      tool_timeout_seconds: 60.0
+      scope: global
+      tool_name_prefix: mcp__{server}__
+      include_tools: []
+      exclude_tools: []
+      risk_level: low
+      confirm_policy: never
 
-notes:
-  config_entry: backend/config.yaml
-  purpose: 在 CSAgent 中原生承载平台化智能体与注册中心能力
+server:
+  # FastAPI 主服务监听地址。
+  host: 0.0.0.0
+  # FastAPI 主服务端口。
+  port: 8200

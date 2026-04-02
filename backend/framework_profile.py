@@ -30,17 +30,19 @@ DEFAULT_SKILL_GUIDE = """## 技能系统
 
 你拥有一个按场景组织的技能系统。技能（Skill）代表一组专属工具和操作指南，而不是知识分类本身。
 
+系统提示中已经包含当前 Agent 可用技能的摘要。
+
 ### 全局工具
-- **load_skills**: 列出或加载技能。当当前工具不足以完成任务时，优先调用它。
+- **load_skills**: 当某个技能摘要不足以支撑执行时，按技能名加载该技能的完整正文。
 - **list_tools**: 查看当前 Agent 在本轮上下文中可用的工具。
-- **list_skills**: 查看当前 Agent 可加载的技能摘要。
 
 ### 通用工作方式
 1. 先判断当前问题是否可以直接回答
-2. 系统提示中只提供技能摘要；如果摘要不足以指导执行，再调用 `load_skills` 查看完整技能正文
-3. 技能加载后，再调用该技能对应的专属工具
-4. 工具返回卡片时，在回复中用 `[[CARD:card_id]]` 引用对应卡片
-5. 对于存在副作用的操作，优先等待明确确认再继续"""
+2. 优先直接依据系统提示里的技能摘要选择合适能力，不需要先额外列技能
+3. 只有当摘要不足时，再调用 `load_skills(skill_name="技能名")` 查看完整技能正文
+4. 技能加载后，再调用该技能对应的专属工具
+5. 工具返回卡片时，在回复中用 `[[CARD:card_id]]` 引用对应卡片
+6. 对于存在副作用的操作，优先等待明确确认再继续"""
 
 DEFAULT_COMPACTION_PROMPT = """你将为一个通用客服智能体生成对话压缩摘要，用于替代冗长历史。
 请只输出 continuity summary，重点包含：
@@ -78,10 +80,10 @@ class LongTermMemorySettings(BaseModel):
 
 
 class UiSettings(BaseModel):
-    app_name: str = "CSAgent Studio"
-    app_subtitle: str = "通用客服智能体框架"
-    welcome_title: str = "你好，我是通用客服智能体"
-    welcome_description: str = "可用于管理 Agent、技能、工具与卡片输出协议，并支持长期记忆和 MCP 工具扩展。"
+    app_name: str = "CSAgent Platform"
+    app_subtitle: str = "平台控制台"
+    welcome_title: str = "平台控制台"
+    welcome_description: str = "管理模型、智能体、工具、技能、卡片与会话。"
     identity_label: str = "演示身份"
     identity_hint: str = "可选；选择后会把该身份标识作为演示环境中的默认用户标识。"
     selected_identity_prefix: str = "当前演示身份"
@@ -167,6 +169,23 @@ def _normalize_profile(profile: FrameworkProfile) -> FrameworkProfile:
             item.title = item.content[:24]
         items.append(item.model_dump())
     payload["long_term_memory"]["items"] = items
+
+    prompts = payload.get("prompts", {})
+    skill_guide = str(prompts.get("skill_guide") or "")
+    if not skill_guide.strip() or "list_skills" in skill_guide:
+        prompts["skill_guide"] = DEFAULT_SKILL_GUIDE
+
+    default_ui = UiSettings().model_dump()
+    ui = payload.get("ui", {})
+    if not str(ui.get("app_name") or "").strip() or "Studio" in str(ui.get("app_name") or ""):
+        ui["app_name"] = default_ui["app_name"]
+    if not str(ui.get("app_subtitle") or "").strip() or str(ui.get("app_subtitle") or "") == "通用客服智能体框架":
+        ui["app_subtitle"] = default_ui["app_subtitle"]
+    if not str(ui.get("welcome_title") or "").strip() or str(ui.get("welcome_title") or "") == "你好，我是通用客服智能体":
+        ui["welcome_title"] = default_ui["welcome_title"]
+    if not str(ui.get("welcome_description") or "").strip() or "Agent、技能、工具与卡片输出协议" in str(ui.get("welcome_description") or ""):
+        ui["welcome_description"] = default_ui["welcome_description"]
+
     return FrameworkProfile.model_validate(payload)
 
 
@@ -175,7 +194,11 @@ def load_framework_profile() -> FrameworkProfile:
     data = _read_yaml(PROFILE_FILE)
     merged = DEFAULT_PROFILE.model_dump()
     _deep_merge(merged, data)
-    return _normalize_profile(FrameworkProfile.model_validate(merged))
+    normalized = _normalize_profile(FrameworkProfile.model_validate(merged))
+    normalized_payload = normalized.model_dump()
+    if normalized_payload != data:
+        _write_yaml(PROFILE_FILE, normalized_payload)
+    return normalized
 
 
 def save_framework_profile(profile: FrameworkProfile) -> FrameworkProfile:

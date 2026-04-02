@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 from db.engine import Session
 from db import crud
 from agent import loop
-from provider import factory
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -30,7 +29,7 @@ async def chat_ws(ws: WebSocket):
 
             async with Session() as db:
                 if not msg.session_id:
-                    session = await crud.create_session(db, title=msg.content[:30] if msg.content else "新对话")
+                    session = await crud.create_session(db, title=msg.content[:30] if msg.content else "新对话", agent_id=msg.agent_id)
                     msg.session_id = session.id
                     if msg.agent_id:
                         await crud.update_session_metadata(db, msg.session_id, {"agent_id": msg.agent_id})
@@ -45,10 +44,9 @@ async def chat_ws(ws: WebSocket):
                             "content": msg.content,
                             "metadata": {"client_meta": msg.client_meta} if msg.client_meta else None,
                         }
-                    ])
+                    ], agent=msg.agent_id or "default")
 
-                provider = factory.create()
-                async for event in loop.run(db, provider, msg.session_id, agent_id=msg.agent_id):
+                async for event in loop.run(db, None, msg.session_id, agent_id=msg.agent_id):
                     await ws.send_text(json.dumps(event.to_dict(), ensure_ascii=False))
 
     except WebSocketDisconnect:
@@ -122,7 +120,7 @@ async def _prepare_chat_turn(db, req: ChatRequest) -> tuple[str, bool]:
     sid = str(req.session_id or "").strip()
     created = False
     if not sid:
-        session = await crud.create_session(db, title=req.content[:30])
+        session = await crud.create_session(db, title=req.content[:30], agent_id=req.agent_id)
         sid = session.id
         created = True
         if req.phone:
@@ -142,13 +140,12 @@ async def _prepare_chat_turn(db, req: ChatRequest) -> tuple[str, bool]:
             "content": req.content,
             "metadata": {"client_meta": req.client_meta} if req.client_meta else None,
         }
-    ])
+    ], agent=req.agent_id or "default")
     return sid, created
 
 
 async def _run_chat_events(db, sid: str, phone: str, agent_id: str):
-    provider = factory.create()
-    async for event in loop.run(db, provider, sid, phone=phone, agent_id=agent_id):
+    async for event in loop.run(db, None, sid, phone=phone, agent_id=agent_id):
         yield event.to_dict()
 
 

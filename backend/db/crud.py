@@ -1,4 +1,5 @@
 import json
+import re
 from copy import deepcopy
 from datetime import datetime
 from sqlalchemy import select
@@ -7,8 +8,46 @@ from sqlalchemy.orm import selectinload
 from db.models import SessionModel, MessageModel, PartModel, LLMRequestModel, AgentEventLogModel, gen_id
 
 
-async def create_session(db: AsyncSession, title: str = "") -> SessionModel:
-    session = SessionModel(id=gen_id(), title=title)
+_SESSION_TITLE_SPACES_RE = re.compile(r"\s+")
+_SESSION_TITLE_LEADING_NOISE_RE = re.compile(r"^[\s\?\uff1f!！,，。\.、;；:：~～`'\"“”‘’\(\)\[\]\{\}<>\-_/\\|@#\$%\^&\*+=]+")
+_SESSION_TITLE_INLINE_NOISE_RE = re.compile(r"[\?\uff1f]{2,}")
+_SESSION_TITLE_TRAILING_NOISE_RE = re.compile(r"[\s\?\uff1f!！,，。\.、;；:：~～`'\"“”‘’\(\)\[\]\{\}<>\-_/\\|@#\$%\^&\*+=]+$")
+_SESSION_TITLE_WORD_RE = re.compile(r"[\w\u4e00-\u9fff]{2,}")
+
+
+def _now_ts() -> float:
+    return datetime.now().timestamp()
+
+
+def _normalize_session_title_text(value: str, limit: int = 30) -> str:
+    text = str(value or "").replace("\r", " ").replace("\n", " ")
+    text = _SESSION_TITLE_SPACES_RE.sub(" ", text).strip()
+    text = _SESSION_TITLE_LEADING_NOISE_RE.sub("", text).strip()
+    text = _SESSION_TITLE_INLINE_NOISE_RE.sub(" ", text).strip()
+    text = _SESSION_TITLE_SPACES_RE.sub(" ", text).strip()
+    text = _SESSION_TITLE_TRAILING_NOISE_RE.sub("", text).strip()
+    return text[:limit]
+
+
+def _has_meaningful_session_title(value: str) -> bool:
+    text = _normalize_session_title_text(value, limit=80)
+    return bool(_SESSION_TITLE_WORD_RE.search(text))
+
+
+def build_session_title(text: str = "", agent_id: str = "") -> str:
+    candidate = _normalize_session_title_text(text)
+    if _has_meaningful_session_title(candidate):
+        return candidate
+    agent = str(agent_id or "").strip()
+    if agent and agent != "default":
+        return f"{agent} 对话"
+    if agent == "default":
+        return "默认智能体对话"
+    return "新对话"
+
+
+async def create_session(db: AsyncSession, title: str = "", agent_id: str = "") -> SessionModel:
+    session = SessionModel(id=gen_id(), title=build_session_title(title, agent_id))
     db.add(session)
     await db.commit()
     await db.refresh(session)
@@ -20,7 +59,7 @@ async def get_session(db: AsyncSession, sid: str) -> SessionModel | None:
 
 
 async def list_sessions(db: AsyncSession) -> list[SessionModel]:
-    result = await db.execute(select(SessionModel).order_by(SessionModel.created_at.desc()))
+    result = await db.execute(select(SessionModel).order_by(SessionModel.updated_at.desc(), SessionModel.created_at.desc()))
     return list(result.scalars().all())
 
 
@@ -36,12 +75,51 @@ async def get_messages(db: AsyncSession, sid: str) -> list[MessageModel]:
     return list(result.scalars().all())
 
 
+async def get_session_first_user_text(db: AsyncSession, sid: str) -> str:
+    result = await db.execute(
+        select(PartModel.content)
+        .join(MessageModel, MessageModel.id == PartModel.message_id)
+        .where(MessageModel.session_id == sid)
+        .where(MessageModel.role == "user")
+        .where(PartModel.type == "text")
+        .order_by(MessageModel.created_at, PartModel.index)
+        .limit(1)
+    )
+    return str(result.scalar() or "")
+
+
+async def ensure_session_title(db: AsyncSession, sid: str, preferred_text: str = "", agent_id: str = "") -> str:
+    session = await db.get(SessionModel, sid)
+    if session is None:
+        return build_session_title(preferred_text, agent_id)
+
+    current_title = str(session.title or "")
+    if _has_meaningful_session_title(current_title):
+        normalized = _normalize_session_title_text(current_title)
+        if normalized != current_title:
+            session.title = normalized
+            await db.commit()
+        return normalized
+
+    source_text = preferred_text
+    if not _has_meaningful_session_title(source_text):
+        source_text = await get_session_first_user_text(db, sid)
+    effective_agent_id = str(agent_id or "").strip()
+    if not effective_agent_id and isinstance(session.metadata_, dict):
+        effective_agent_id = str(session.metadata_.get("agent_id", "") or "").strip()
+    next_title = build_session_title(source_text, effective_agent_id)
+    if next_title != current_title:
+        session.title = next_title
+        await db.commit()
+    return next_title
+
+
 async def add_message(db: AsyncSession, sid: str, role: str, parts: list[dict], agent: str = "default", model: str = "", tokens: tuple[int, int] = (0, 0)) -> MessageModel:
     msg = MessageModel(
         id=gen_id(),
         session_id=sid,
         role=role,
-        agent=agent,
+        agent=str(agent or "default").strip() or "default",
         model=model,
         token_input=tokens[0],
         token_output=tokens[1],
@@ -62,6 +140,9 @@ async def add_message(db: AsyncSession, sid: str, role: str, parts: list[dict], 
             metadata_=p.get("metadata"),
         )
         db.add(part)
+    session = await db.get(SessionModel, sid)
+    if session:
+        session.updated_at = _now_ts()
     await db.commit()
     await db.refresh(msg, ["parts"])
     return msg
@@ -86,6 +167,9 @@ async def add_part(db: AsyncSession, mid: str, sid: str, ptype: str, content: st
         metadata_=metadata,
     )
     db.add(part)
+    session = await db.get(SessionModel, sid)
+    if session:
+        session.updated_at = _now_ts()
     await db.commit()
     await db.refresh(part)
     return part
@@ -98,6 +182,7 @@ async def update_session_metadata(db: AsyncSession, sid: str, metadata: dict) ->
         existing = deepcopy(session.metadata_ or {})
         existing.update(deepcopy(metadata))
         session.metadata_ = existing
+        session.updated_at = _now_ts()
         await db.commit()
 
 

@@ -15,6 +15,8 @@ class SessionResp(BaseModel):
     id: str
     title: str
     created_at: float
+    updated_at: float
+    agent_id: str = ""
 
     class Config:
         from_attributes = True
@@ -32,15 +34,29 @@ class MessageResp(BaseModel):
         from_attributes = True
 
 
+async def _to_session_resp(db: AsyncSession, session) -> dict:
+    metadata = session.metadata_ if isinstance(session.metadata_, dict) else {}
+    agent_id = str(metadata.get("agent_id", "") or "").strip()
+    title = await crud.ensure_session_title(db, session.id, preferred_text=session.title, agent_id=agent_id)
+    return {
+        "id": session.id,
+        "title": title,
+        "created_at": float(session.created_at or 0),
+        "updated_at": float(session.updated_at or 0),
+        "agent_id": agent_id,
+    }
+
+
 @router.post("", response_model=SessionResp)
 async def create_session(req: CreateSessionReq, db: AsyncSession = Depends(get_db)):
     session = await crud.create_session(db, req.title)
-    return session
+    return await _to_session_resp(db, session)
 
 
 @router.get("", response_model=list[SessionResp])
 async def list_sessions(db: AsyncSession = Depends(get_db)):
-    return await crud.list_sessions(db)
+    sessions = await crud.list_sessions(db)
+    return [await _to_session_resp(db, session) for session in sessions]
 
 
 @router.get("/{sid}", response_model=SessionResp)
@@ -49,7 +65,7 @@ async def get_session(sid: str, db: AsyncSession = Depends(get_db)):
     if not session:
         from fastapi import HTTPException
         raise HTTPException(404, "Session not found")
-    return session
+    return await _to_session_resp(db, session)
 
 
 @router.get("/{sid}/messages")

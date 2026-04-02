@@ -39,17 +39,32 @@ export interface FrameworkInfo {
     display_name: string
     summary: string
     provider_type: string
+    source_ref: string
     scope: string
     enabled: boolean
     supports_card: boolean
     card_type: string
+    input_schema: Record<string, any>
+    output_schema: Record<string, any>
+    policy: Record<string, any>
+    card_binding: Record<string, any>
+    transport_config: Record<string, any>
+    metadata: Record<string, any>
   }>
   skills: Array<{
     skill_name: string
     display_name: string
     summary: string
+    document_md: string
     enabled: boolean
     tool_names: string[]
+    global_tool_names: string[]
+    card_types: string[]
+    entry_intents: string[]
+    phases: string[]
+    source_type: string
+    source_ref: string
+    metadata: Record<string, any>
   }>
   agents: Array<{
     agent_id: string
@@ -58,8 +73,17 @@ export interface FrameworkInfo {
     enabled: boolean
     published: boolean
     is_default: boolean
+    system_core_prompt: string
+    persona_prompt: string
+    skill_guide_prompt: string
+    summary_prompt: string
+    memory_prompt: string
     global_tool_names: string[]
     skill_names: string[]
+    model_config: Record<string, any>
+    tool_policy_config: Record<string, any>
+    memory_config: Record<string, any>
+    metadata: Record<string, any>
   }>
 }
 
@@ -76,10 +100,10 @@ const DEFAULT_PROFILE: FrameworkProfile = {
     items: [],
   },
   ui: {
-    app_name: 'CSAgent Studio',
-    app_subtitle: '通用客服智能体框架',
-    welcome_title: '你好，我是通用客服智能体',
-    welcome_description: '可用于管理 Agent、技能、工具与卡片输出协议。',
+    app_name: 'CSAgent Platform',
+    app_subtitle: '平台控制台',
+    welcome_title: '平台控制台',
+    welcome_description: '管理模型、智能体、工具、技能、卡片与会话。',
     identity_label: '演示身份',
     identity_hint: '可选',
     selected_identity_prefix: '当前演示身份',
