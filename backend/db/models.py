@@ -181,3 +181,21 @@ class PlatformAgentModel(Base):
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSON, default=None)
     created_at: Mapped[float] = mapped_column(Float, default=lambda: datetime.now().timestamp())
     updated_at: Mapped[float] = mapped_column(Float, default=lambda: datetime.now().timestamp())
+
+
+class PlatformCardTemplateModel(Base):
+    __tablename__ = "platform_card_template"
+
+    template_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(256), default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    template_type: Mapped[str] = mapped_column(String(64), default="info_detail")
+    renderer_key: Mapped[str] = mapped_column(String(128), default="")
+    data_schema: Mapped[dict | None] = mapped_column(JSON, default=None)
+    ui_schema: Mapped[dict | None] = mapped_column(JSON, default=None)
+    action_schema: Mapped[dict | None] = mapped_column(JSON, default=None)
+    sample_payload: Mapped[dict | None] = mapped_column(JSON, default=None)
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSON, default=None)
+    created_at: Mapped[float] = mapped_column(Float, default=lambda: datetime.now().timestamp())
+    updated_at: Mapped[float] = mapped_column(Float, default=lambda: datetime.now().timestamp())

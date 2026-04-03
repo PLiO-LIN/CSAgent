@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import PlatformAgentModel, PlatformSkillModel, PlatformToolModel
+from db.models import PlatformAgentModel, PlatformCardTemplateModel, PlatformSkillModel, PlatformToolModel
 from framework_profile import load_framework_profile
 from runtime_scope import current_runtime_scope
 
@@ -77,6 +77,22 @@ class PlatformAgentRecord(BaseModel):
     updated_at: float = 0
 
 
+class PlatformCardTemplateRecord(BaseModel):
+    template_id: str
+    display_name: str = ""
+    summary: str = ""
+    enabled: bool = True
+    template_type: str = "info_detail"
+    renderer_key: str = ""
+    data_schema: dict[str, Any] = Field(default_factory=dict)
+    ui_schema: dict[str, Any] = Field(default_factory=dict)
+    action_schema: dict[str, Any] = Field(default_factory=dict)
+    sample_payload: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: float = 0
+    updated_at: float = 0
+
+
 class AgentRuntimeConfig(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -98,6 +114,139 @@ class AgentRuntimeConfig(BaseModel):
 _tool_cache: dict[str, PlatformToolRecord] = {}
 _skill_cache: dict[str, PlatformSkillRecord] = {}
 _agent_cache: dict[str, PlatformAgentRecord] = {}
+_card_template_cache: dict[str, PlatformCardTemplateRecord] = {}
+
+
+DEFAULT_CARD_TEMPLATES: tuple[PlatformCardTemplateRecord, ...] = (
+    PlatformCardTemplateRecord(
+        template_id="info_detail_default",
+        display_name="信息详情卡",
+        summary="适合账户信息、账单、资料详情等轻量展示场景。",
+        template_type="info_detail",
+        renderer_key="template::info_detail",
+        data_schema={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "summary": {"type": "string"},
+                "fields": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string"},
+                            "value": {},
+                        },
+                    },
+                },
+            },
+        },
+        ui_schema={
+            "blocks": [
+                {"type": "hero", "title": "$.title", "summary": "$.summary"},
+                {"type": "kv_list", "path": "$.fields"},
+            ],
+        },
+        action_schema={"actions": []},
+        sample_payload={
+            "title": "账户概览",
+            "summary": "可用于展示基础资料、状态和字段明细。",
+            "fields": [
+                {"label": "账户名", "value": "张三"},
+                {"label": "当前状态", "value": "正常"},
+                {"label": "套餐", "value": "5G 畅享版"},
+            ],
+        },
+        metadata={"managed_by": "platform_default_template"},
+    ),
+    PlatformCardTemplateRecord(
+        template_id="metric_summary_default",
+        display_name="指标汇总卡",
+        summary="适合余额、积分、账单指标等概览型卡片。",
+        template_type="metric_summary",
+        renderer_key="template::metric_summary",
+        data_schema={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "summary": {"type": "string"},
+                "metrics": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string"},
+                            "value": {},
+                            "hint": {"type": "string"},
+                        },
+                    },
+                },
+            },
+        },
+        ui_schema={
+            "blocks": [
+                {"type": "hero", "title": "$.title", "summary": "$.summary"},
+                {"type": "metric_grid", "path": "$.metrics"},
+            ],
+        },
+        action_schema={"actions": []},
+        sample_payload={
+            "title": "账户余额",
+            "summary": "适合展示几个重要数字。",
+            "metrics": [
+                {"label": "余额", "value": "86.00 元", "hint": "账户可用余额"},
+                {"label": "积分", "value": 2480, "hint": "可兑换积分"},
+                {"label": "账单", "value": "128.50 元", "hint": "本月待缴"},
+            ],
+        },
+        metadata={"managed_by": "platform_default_template"},
+    ),
+    PlatformCardTemplateRecord(
+        template_id="recommendation_list_default",
+        display_name="推荐列表卡",
+        summary="适合推荐商品、方案列表、权益集合等场景。",
+        template_type="recommendation_list",
+        renderer_key="template::recommendation_list",
+        data_schema={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "summary": {"type": "string"},
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "summary": {"type": "string"},
+                            "badges": {"type": "array", "items": {"type": "string"}},
+                        },
+                    },
+                },
+            },
+        },
+        ui_schema={
+            "blocks": [
+                {"type": "hero", "title": "$.title", "summary": "$.summary"},
+                {"type": "item_list", "path": "$.items"},
+            ],
+        },
+        action_schema={
+            "actions": [
+                {"label": "继续推荐", "contentTemplate": "继续基于 {{title}} 给我推荐"},
+            ],
+        },
+        sample_payload={
+            "title": "套餐推荐",
+            "summary": "适合展示若干候选项目并附带操作入口。",
+            "items": [
+                {"title": "5G 畅享 129", "summary": "流量更高，适合重度使用", "badges": ["129 元/月", "100GB"]},
+                {"title": "轻享 79", "summary": "价格友好，适合日常沟通", "badges": ["79 元/月", "30GB"]},
+            ],
+        },
+        metadata={"managed_by": "platform_default_template"},
+    ),
+)
 
 
 def _dedupe_text_list(values: list[str] | tuple[str, ...] | set[str] | None) -> list[str]:
@@ -128,6 +277,24 @@ def _record_from_tool_model(model: PlatformToolModel) -> PlatformToolRecord:
         policy=dict(model.policy or {}),
         card_binding=dict(model.card_binding or {}),
         transport_config=dict(model.transport_config or {}),
+        metadata=dict(model.metadata_ or {}),
+        created_at=float(model.created_at or 0),
+        updated_at=float(model.updated_at or 0),
+    )
+
+
+def _record_from_card_template_model(model: PlatformCardTemplateModel) -> PlatformCardTemplateRecord:
+    return PlatformCardTemplateRecord(
+        template_id=str(model.template_id or "").strip(),
+        display_name=str(model.display_name or "").strip(),
+        summary=str(model.summary or "").strip(),
+        enabled=bool(model.enabled),
+        template_type=str(model.template_type or "info_detail").strip() or "info_detail",
+        renderer_key=str(model.renderer_key or "").strip(),
+        data_schema=dict(model.data_schema or {}),
+        ui_schema=dict(model.ui_schema or {}),
+        action_schema=dict(model.action_schema or {}),
+        sample_payload=dict(model.sample_payload or {}),
         metadata=dict(model.metadata_ or {}),
         created_at=float(model.created_at or 0),
         updated_at=float(model.updated_at or 0),
@@ -272,9 +439,11 @@ async def refresh_registry_cache(db: AsyncSession) -> None:
     tool_rows = await db.execute(select(PlatformToolModel))
     skill_rows = await db.execute(select(PlatformSkillModel))
     agent_rows = await db.execute(select(PlatformAgentModel))
+    card_template_rows = await db.execute(select(PlatformCardTemplateModel))
     _tool_cache.clear()
     _skill_cache.clear()
     _agent_cache.clear()
+    _card_template_cache.clear()
     for row in tool_rows.scalars().all():
         record = _record_from_tool_model(row)
         _tool_cache[record.tool_name] = record
@@ -284,6 +453,9 @@ async def refresh_registry_cache(db: AsyncSession) -> None:
     for row in agent_rows.scalars().all():
         record = _record_from_agent_model(row)
         _agent_cache[record.agent_id] = record
+    for row in card_template_rows.scalars().all():
+        record = _record_from_card_template_model(row)
+        _card_template_cache[record.template_id] = record
 
 
 async def bootstrap_platform_registry(db: AsyncSession) -> None:
@@ -291,7 +463,38 @@ async def bootstrap_platform_registry(db: AsyncSession) -> None:
     await remove_seed_skills_from_registry(db)
     await sync_mcp_tools_into_registry(db, force=False)
     await ensure_default_agent(db)
+    await ensure_default_card_templates(db)
     await refresh_registry_cache(db)
+
+
+async def ensure_default_card_templates(db: AsyncSession) -> list[PlatformCardTemplateRecord]:
+    now = time.time()
+    created_ids: list[str] = []
+    for record in DEFAULT_CARD_TEMPLATES:
+        existing = await db.get(PlatformCardTemplateModel, record.template_id)
+        if existing is not None:
+            continue
+        model = PlatformCardTemplateModel(
+            template_id=record.template_id,
+            display_name=record.display_name or record.template_id,
+            summary=record.summary,
+            enabled=bool(record.enabled),
+            template_type=record.template_type,
+            renderer_key=record.renderer_key,
+            data_schema=dict(record.data_schema or {}),
+            ui_schema=dict(record.ui_schema or {}),
+            action_schema=dict(record.action_schema or {}),
+            sample_payload=dict(record.sample_payload or {}),
+            metadata_=dict(record.metadata or {}),
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(model)
+        created_ids.append(record.template_id)
+    if created_ids:
+        await db.commit()
+        await refresh_registry_cache(db)
+    return [record for record in list_card_template_records(include_disabled=True) if record.template_id in set(created_ids)]
 
 
 async def sync_local_tools_into_registry(db: AsyncSession) -> list[PlatformToolRecord]:
@@ -522,6 +725,28 @@ async def upsert_agent_record(db: AsyncSession, payload: PlatformAgentRecord) ->
     return _agent_cache[payload.agent_id]
 
 
+async def upsert_card_template_record(db: AsyncSession, payload: PlatformCardTemplateRecord) -> PlatformCardTemplateRecord:
+    now = time.time()
+    model = await db.get(PlatformCardTemplateModel, payload.template_id)
+    if model is None:
+        model = PlatformCardTemplateModel(template_id=payload.template_id, created_at=now)
+    model.display_name = payload.display_name or payload.template_id
+    model.summary = payload.summary
+    model.enabled = bool(payload.enabled)
+    model.template_type = payload.template_type or "info_detail"
+    model.renderer_key = payload.renderer_key
+    model.data_schema = dict(payload.data_schema or {})
+    model.ui_schema = dict(payload.ui_schema or {})
+    model.action_schema = dict(payload.action_schema or {})
+    model.sample_payload = dict(payload.sample_payload or {})
+    model.metadata_ = dict(payload.metadata or {})
+    model.updated_at = now
+    db.add(model)
+    await db.commit()
+    await refresh_registry_cache(db)
+    return _card_template_cache[payload.template_id]
+
+
 async def publish_agent(db: AsyncSession, agent_id: str) -> PlatformAgentRecord | None:
     model = await db.get(PlatformAgentModel, agent_id)
     if model is None:
@@ -540,6 +765,7 @@ async def get_registry_snapshot(db: AsyncSession) -> dict[str, Any]:
         "tools": [record.model_dump(by_alias=True) for record in list_tool_records(include_disabled=True)],
         "skills": [record.model_dump(by_alias=True) for record in list_skill_records(include_disabled=True, scoped=False)],
         "agents": [record.model_dump(by_alias=True) for record in list_agent_records(include_disabled=True)],
+        "card_templates": [record.model_dump(by_alias=True) for record in list_card_template_records(include_disabled=True)],
     }
 
 
@@ -593,6 +819,17 @@ def list_agent_records(include_disabled: bool = False) -> list[PlatformAgentReco
     if not include_disabled:
         records = [record for record in records if record.enabled]
     return sorted(records, key=lambda item: item.agent_id)
+
+
+def list_card_template_records(include_disabled: bool = False) -> list[PlatformCardTemplateRecord]:
+    records = list(_card_template_cache.values())
+    if not include_disabled:
+        records = [record for record in records if record.enabled]
+    return sorted(records, key=lambda item: item.template_id)
+
+
+def get_card_template_record(template_id: str = "") -> PlatformCardTemplateRecord | None:
+    return _card_template_cache.get(str(template_id or "").strip())
 
 
 

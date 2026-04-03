@@ -86,9 +86,15 @@ export interface CardCatalogItem {
   binding: string
 }
 
+export interface CardPreviewResult {
+  card: Record<string, any>
+  debug: Record<string, any>
+}
+
 type AgentRecord = FrameworkInfo['agents'][number]
 type ToolRecord = FrameworkInfo['tools'][number]
 type SkillRecord = FrameworkInfo['skills'][number]
+type CardTemplateRecord = FrameworkInfo['card_templates'][number]
 
 const DEFAULT_MODEL_CONFIG: ModelConfig = {
   provider: 'openai_compatible',
@@ -112,6 +118,7 @@ const EMPTY_INFO: FrameworkInfo = {
   tools: [],
   skills: [],
   agents: [],
+  card_templates: [],
 }
 
 function upsertByKey<T extends Record<string, any>>(items: T[], key: string, record: T) {
@@ -240,6 +247,38 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     }))
     return data as SkillRecord
   }, [registryInfo.skills])
+
+  const saveCardTemplate = useCallback(async (payload: CardTemplateRecord) => {
+    const templateId = String(payload?.template_id || '').trim()
+    if (!templateId) throw new Error('模板 ID 不能为空')
+    const exists = (registryInfo.card_templates || []).some(item => item.template_id === templateId)
+    const resp = await fetch(exists ? `/api/platform/card-templates/${encodeURIComponent(templateId)}` : '/api/platform/card-templates', {
+      method: exists ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!resp.ok) throw new Error('保存卡片模板失败')
+    const data = await resp.json()
+    setRegistryInfo(prev => ({
+      ...prev,
+      card_templates: upsertByKey(prev.card_templates || [], 'template_id', data),
+    }))
+    return data as CardTemplateRecord
+  }, [registryInfo.card_templates])
+
+  const previewCard = useCallback(async (payload: { template: CardTemplateRecord; source_payload: Record<string, any>; binding?: Record<string, any> }) => {
+    const resp = await fetch('/api/platform/cards/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        template: payload.template,
+        source_payload: payload.source_payload || {},
+        binding: payload.binding || {},
+      }),
+    })
+    if (!resp.ok) throw new Error('卡片预览失败')
+    return await resp.json() as CardPreviewResult
+  }, [])
 
   const refreshModelConfig = useCallback(async () => {
     setConfigLoading(true)
@@ -417,7 +456,7 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     agents: registryInfo.agents?.length || 0,
     tools: registryInfo.tools?.length || 0,
     skills: registryInfo.skills?.length || 0,
-    cards: cardCatalog.length,
+    cards: cardCatalog.length + (registryInfo.card_templates?.length || 0),
     sessions: sessions.length,
   }), [modelConfig.chat_model, modelConfig.vendors, registryInfo, cardCatalog.length, sessions.length])
 
@@ -429,10 +468,13 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     agents: registryInfo.agents,
     tools: registryInfo.tools,
     skills: registryInfo.skills,
+    cardTemplates: registryInfo.card_templates || [],
     saveAgent,
     publishAgent,
     saveTool,
     saveSkill,
+    saveCardTemplate,
+    previewCard,
     syncLocalTools,
     syncMcpTools,
     modelConfig,

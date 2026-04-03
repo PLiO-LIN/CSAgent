@@ -85,6 +85,19 @@ export interface FrameworkInfo {
     memory_config: Record<string, any>
     metadata: Record<string, any>
   }>
+  card_templates: Array<{
+    template_id: string
+    display_name: string
+    summary: string
+    enabled: boolean
+    template_type: string
+    renderer_key: string
+    data_schema: Record<string, any>
+    ui_schema: Record<string, any>
+    action_schema: Record<string, any>
+    sample_payload: Record<string, any>
+    metadata: Record<string, any>
+  }>
 }
 
 const DEFAULT_PROFILE: FrameworkProfile = {

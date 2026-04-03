@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 import { Bot, Brain, ChevronRight, Cpu, History, LayoutDashboard, Plus, RefreshCw, Save, SendHorizontal, Sparkles, Wrench } from 'lucide-react'
 import ChatWorkspace from './ChatWorkspace'
+import CardRenderer from './CardRenderer'
 import { usePlatformConsole, type ModelCatalogVendor } from '../hooks/usePlatformConsole'
 import { type UseChatController } from '../hooks/useChat'
 import { type FrameworkInfo, type FrameworkProfile } from '../hooks/useFrameworkProfile'
+import { resolveChatActionInput } from '../lib/chatDisplay'
 import {
   agentFormToPayload,
+  cardTemplateFormToPayload,
   createAgentForm,
+  createCardTemplateForm,
   createSkillForm,
   createToolForm,
   formatJson,
@@ -211,6 +215,17 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
   )
 }
 
+function createDefaultCardBinding(templateId = '') {
+  return formatJson({
+    mode: 'field_map',
+    template_id: templateId,
+    title: '$.title',
+    summary: '$.summary',
+    payload_path: '$',
+    actions_path: '$.actions',
+  })
+}
+
 export default function PlatformWorkbenchShell({ chat, profile, info, error }: Props) {
   const consoleData = usePlatformConsole(info)
   const [view, setView] = useState<ViewKey>('overview')
@@ -220,6 +235,8 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
   const [toolName, setToolName] = useState('')
   const [skillName, setSkillName] = useState('')
   const [cardId, setCardId] = useState('')
+  const [cardsMode, setCardsMode] = useState<'templates' | 'bindings'>('templates')
+  const [cardTemplateId, setCardTemplateId] = useState('')
   const [vendorId, setVendorId] = useState('')
   const [mcpServerName, setMcpServerName] = useState('')
   const [modelDraft, setModelDraft] = useState<{ api_key: string; embed_model: string; active_vendor: string; active_model: string; vendors: ModelCatalogVendor[] }>({
@@ -235,17 +252,24 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
   const [agentForm, setAgentForm] = useState(createAgentForm())
   const [toolForm, setToolForm] = useState(createToolForm())
   const [skillForm, setSkillForm] = useState(createSkillForm())
+  const [cardTemplateForm, setCardTemplateForm] = useState(createCardTemplateForm())
   const [cardToolDraft, setCardToolDraft] = useState({ summary: '', card_type: '', card_binding_text: '{}' })
   const [cardSkillDraft, setCardSkillDraft] = useState({ summary: '', card_types_text: '' })
+  const [cardPlaygroundDraft, setCardPlaygroundDraft] = useState({ source_payload_text: '{}', binding_text: createDefaultCardBinding('') })
+  const [cardPreviewCard, setCardPreviewCard] = useState<Record<string, any> | null>(null)
+  const [cardPreviewDebug, setCardPreviewDebug] = useState<Record<string, any>>({})
+  const [cardPreviewActionText, setCardPreviewActionText] = useState('')
   const [mcpServerDraft, setMcpServerDraft] = useState<McpServerDraft>(EMPTY_MCP_SERVER_DRAFT)
 
   const agents = consoleData.agents
   const tools = consoleData.tools
   const skills = consoleData.skills
+  const cardTemplates = consoleData.cardTemplates
   const selectedAgent = agents.find(item => item.agent_id === agentId) || null
   const selectedTool = tools.find(item => item.tool_name === toolName) || null
   const selectedSkill = skills.find(item => item.skill_name === skillName) || null
   const selectedCard = consoleData.cardCatalog.find(item => item.id === cardId) || null
+  const selectedCardTemplate = cardTemplates.find(item => item.template_id === cardTemplateId) || null
   const selectedVendor = modelDraft.vendors.find(item => item.vendor_id === vendorId) || modelDraft.vendors[0] || null
   const selectedAgentVendor = consoleData.modelConfig.vendors.find(item => item.vendor_id === agentForm.model_vendor_id) || consoleData.modelConfig.vendors[0] || null
   const mcpServerNames = Object.keys(consoleData.mcpConfig.servers || {})
@@ -285,7 +309,8 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
     if (!toolName && tools[0]?.tool_name) setToolName(tools[0].tool_name)
     if (!skillName && skills[0]?.skill_name) setSkillName(skills[0].skill_name)
     if (!cardId && consoleData.cardCatalog[0]?.id) setCardId(consoleData.cardCatalog[0].id)
-  }, [agentId, agents, toolName, tools, skillName, skills, cardId, consoleData.cardCatalog])
+    if (!cardTemplateId && cardTemplates[0]?.template_id) setCardTemplateId(cardTemplates[0].template_id)
+  }, [agentId, agents, toolName, tools, skillName, skills, cardId, consoleData.cardCatalog, cardTemplateId, cardTemplates])
 
   useEffect(() => {
     if (vendorId && !modelDraft.vendors.some(item => item.vendor_id === vendorId)) {
@@ -319,6 +344,33 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
   useEffect(() => {
     setSkillForm(skillName === NEW_KEY ? createSkillForm({ source_type: 'registry' }) : createSkillForm(selectedSkill || undefined))
   }, [skillName, selectedSkill])
+
+  useEffect(() => {
+    const next = cardTemplateId === NEW_KEY
+      ? createCardTemplateForm({
+        template_type: 'info_detail',
+        renderer_key: 'template::info_detail',
+        data_schema: { type: 'object', properties: {} },
+        ui_schema: {
+          blocks: [
+            { type: 'hero', title: '$.title', summary: '$.summary' },
+            { type: 'kv_list', path: '$.fields' },
+          ],
+        },
+        action_schema: { actions: [] },
+        sample_payload: { title: '样例标题', summary: '样例摘要', fields: [] },
+      })
+      : createCardTemplateForm(selectedCardTemplate || undefined)
+    if (!next.renderer_key) next.renderer_key = `template::${next.template_type || 'info_detail'}`
+    setCardTemplateForm(next)
+    setCardPlaygroundDraft({
+      source_payload_text: next.sample_payload_text || '{}',
+      binding_text: createDefaultCardBinding(next.template_id),
+    })
+    setCardPreviewCard(null)
+    setCardPreviewDebug({})
+    setCardPreviewActionText('')
+  }, [cardTemplateId, selectedCardTemplate])
 
   useEffect(() => {
     if (!selectedCard) return
@@ -968,62 +1020,159 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
   )
 
   const renderCards = () => (
-    <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
-      <ResourceList title="卡片协议" items={consoleData.cardCatalog} selectedKey={cardId} onSelect={setCardId} getKey={item => item.id} getTitle={item => item.card_type} getMeta={item => `${item.source_kind} · ${item.source_name}`} />
-      {selectedCard ? (
-        <Surface className="p-6">
-          <div className="mb-5 flex items-center justify-between">
-            <div className="text-lg font-semibold text-slate-900">{selectedCard.card_type}</div>
-            {selectedCard.source_kind === 'tool' ? (
-              <button onClick={() => { setToolName(selectedCard.source_name); setView('tools') }} className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">去工具配置</button>
-            ) : (
-              <button onClick={() => { setSkillName(selectedCard.source_name); setView('skills') }} className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">去技能配置</button>
-            )}
-          </div>
+    <div className="space-y-5">
+      <Surface className="p-4">
+        <div className="flex flex-wrap gap-2">
+          <Chip active={cardsMode === 'templates'} onClick={() => setCardsMode('templates')}>模板库</Chip>
+          <Chip active={cardsMode === 'bindings'} onClick={() => setCardsMode('bindings')}>绑定协议</Chip>
+        </div>
+      </Surface>
 
-          {selectedCard.source_kind === 'tool' ? (
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="md:col-span-2"><Field label="摘要"><Area rows={3} value={cardToolDraft.summary} onChange={e => setCardToolDraft(prev => ({ ...prev, summary: e.target.value }))} /></Field></div>
-              <Field label="Card Type"><Input value={cardToolDraft.card_type} onChange={e => setCardToolDraft(prev => ({ ...prev, card_type: e.target.value }))} /></Field>
-              <Field label="来源工具"><Input value={selectedCard.source_name} disabled /></Field>
-              <div className="md:col-span-2"><Field label="卡片绑定 JSON"><Area rows={10} value={cardToolDraft.card_binding_text} onChange={e => setCardToolDraft(prev => ({ ...prev, card_binding_text: e.target.value }))} /></Field></div>
-              <div className="md:col-span-2">
+      {cardsMode === 'templates' ? (
+        <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
+          <ResourceList title="卡片模板" items={cardTemplates} selectedKey={cardTemplateId} onSelect={setCardTemplateId} onNew={() => setCardTemplateId(NEW_KEY)} getKey={item => item.template_id} getTitle={item => item.display_name || item.template_id} getMeta={item => `${item.template_type} · ${item.summary || (item.enabled ? '已启用' : '已关闭')}`} newLabel="新增模板" />
+          <div className="space-y-5">
+            <Surface className="p-6">
+              <div className="mb-5 flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-lg font-semibold text-slate-900">{cardTemplateId === NEW_KEY ? '新建卡片模板' : cardTemplateForm.display_name || cardTemplateForm.template_id || '卡片模板'}</div>
+                  <div className="mt-1 text-sm text-slate-500">模板描述渲染结构、数据 Schema 和动作协议，后续可被工具绑定直接复用。</div>
+                </div>
                 <button onClick={() => void runAction(async () => {
-                  const base = tools.find(item => item.tool_name === selectedCard.source_name)
-                  if (!base) throw new Error('来源工具不存在')
-                  const saved = await consoleData.saveTool({
-                    ...base,
-                    summary: cardToolDraft.summary.trim(),
-                    supports_card: true,
-                    card_type: cardToolDraft.card_type.trim(),
-                    card_binding: parseJsonText(cardToolDraft.card_binding_text, {}, '卡片绑定'),
-                  })
-                  setCardId(`tool:${saved.tool_name}:${saved.card_type || 'bound'}`)
-                }, '卡片协议已保存')} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600"><Save size={14} />保存卡片配置</button>
+                  const saved = await consoleData.saveCardTemplate(cardTemplateFormToPayload(cardTemplateForm))
+                  setCardTemplateId(saved.template_id)
+                }, '卡片模板已保存')} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600"><Save size={14} />保存模板</button>
               </div>
-            </div>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="md:col-span-2"><Field label="摘要"><Area rows={3} value={cardSkillDraft.summary} onChange={e => setCardSkillDraft(prev => ({ ...prev, summary: e.target.value }))} /></Field></div>
-              <Field label="来源技能"><Input value={selectedCard.source_name} disabled /></Field>
-              <Field label="卡片类型"><Area rows={8} value={cardSkillDraft.card_types_text} onChange={e => setCardSkillDraft(prev => ({ ...prev, card_types_text: e.target.value }))} /></Field>
-              <div className="md:col-span-2">
-                <button onClick={() => void runAction(async () => {
-                  const base = skills.find(item => item.skill_name === selectedCard.source_name)
-                  if (!base) throw new Error('来源技能不存在')
-                  const saved = await consoleData.saveSkill({
-                    ...base,
-                    summary: cardSkillDraft.summary.trim(),
-                    card_types: cardSkillDraft.card_types_text.split(/[\n,]/g).map(item => item.trim()).filter(Boolean),
-                  })
-                  setCardId(`skill:${saved.skill_name}:${saved.card_types[0] || selectedCard.card_type}`)
-                }, '卡片协议已保存')} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600"><Save size={14} />保存卡片配置</button>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field label="模板 ID"><Input value={cardTemplateForm.template_id} onChange={e => setCardTemplateForm(prev => ({ ...prev, template_id: e.target.value }))} /></Field>
+                <Field label="启用状态">
+                  <Select value={cardTemplateForm.enabled ? 'true' : 'false'} onChange={e => setCardTemplateForm(prev => ({ ...prev, enabled: e.target.value === 'true' }))}>
+                    <option value="true">启用</option>
+                    <option value="false">关闭</option>
+                  </Select>
+                </Field>
+                <Field label="展示名"><Input value={cardTemplateForm.display_name} onChange={e => setCardTemplateForm(prev => ({ ...prev, display_name: e.target.value }))} /></Field>
+                <Field label="模板类型"><Input value={cardTemplateForm.template_type} onChange={e => setCardTemplateForm(prev => ({ ...prev, template_type: e.target.value }))} /></Field>
+                <div className="md:col-span-2"><Field label="摘要"><Area rows={3} value={cardTemplateForm.summary} onChange={e => setCardTemplateForm(prev => ({ ...prev, summary: e.target.value }))} /></Field></div>
+                <div className="md:col-span-2"><Field label="Renderer Key"><Input value={cardTemplateForm.renderer_key} onChange={e => setCardTemplateForm(prev => ({ ...prev, renderer_key: e.target.value }))} /></Field></div>
+                <Field label="Data Schema"><Area rows={10} value={cardTemplateForm.data_schema_text} onChange={e => setCardTemplateForm(prev => ({ ...prev, data_schema_text: e.target.value }))} /></Field>
+                <Field label="UI Schema"><Area rows={10} value={cardTemplateForm.ui_schema_text} onChange={e => setCardTemplateForm(prev => ({ ...prev, ui_schema_text: e.target.value }))} /></Field>
+                <Field label="动作 Schema"><Area rows={10} value={cardTemplateForm.action_schema_text} onChange={e => setCardTemplateForm(prev => ({ ...prev, action_schema_text: e.target.value }))} /></Field>
+                <Field label="样例 Payload"><Area rows={10} value={cardTemplateForm.sample_payload_text} onChange={e => setCardTemplateForm(prev => ({ ...prev, sample_payload_text: e.target.value }))} /></Field>
+                <div className="md:col-span-2"><Field label="附加信息"><Area rows={6} value={cardTemplateForm.metadata_text} onChange={e => setCardTemplateForm(prev => ({ ...prev, metadata_text: e.target.value }))} /></Field></div>
               </div>
+            </Surface>
+
+            <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+              <Surface className="p-6">
+                <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-lg font-semibold text-slate-900">Card Playground</div>
+                    <div className="mt-1 text-sm text-slate-500">使用来源 JSON 和绑定配置生成预览卡片，验证映射与动作协议。</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button onClick={() => setCardPlaygroundDraft(prev => ({ ...prev, source_payload_text: cardTemplateForm.sample_payload_text || '{}' }))} className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">载入样例</button>
+                    <button onClick={() => setCardPlaygroundDraft(prev => ({ ...prev, binding_text: createDefaultCardBinding(cardTemplateForm.template_id) }))} className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">重置绑定</button>
+                    <button onClick={() => void runAction(async () => {
+                      const template = cardTemplateFormToPayload(cardTemplateForm)
+                      const sourcePayload = parseJsonText(cardPlaygroundDraft.source_payload_text, {}, '来源 Payload')
+                      const binding = parseJsonText(cardPlaygroundDraft.binding_text, {}, '绑定配置')
+                      const result = await consoleData.previewCard({ template, source_payload: sourcePayload, binding })
+                      setCardPreviewCard(result.card || null)
+                      setCardPreviewDebug(result.debug || {})
+                      setCardPreviewActionText('')
+                    }, '卡片预览已更新')} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600"><Sparkles size={14} />生成预览</button>
+                  </div>
+                </div>
+
+                <div className="grid gap-4">
+                  <Field label="来源 Payload JSON"><Area rows={16} value={cardPlaygroundDraft.source_payload_text} onChange={e => setCardPlaygroundDraft(prev => ({ ...prev, source_payload_text: e.target.value }))} /></Field>
+                  <Field label="绑定 JSON"><Area rows={16} value={cardPlaygroundDraft.binding_text} onChange={e => setCardPlaygroundDraft(prev => ({ ...prev, binding_text: e.target.value }))} /></Field>
+                </div>
+              </Surface>
+
+              <Surface className="p-6">
+                <div className="mb-4 text-lg font-semibold text-slate-900">预览结果</div>
+                {cardPreviewCard ? (
+                  <CardRenderer card={cardPreviewCard} onAction={input => setCardPreviewActionText(formatJson(resolveChatActionInput(input)))} />
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-[#fbfefd] px-4 py-8 text-center text-sm text-slate-500">生成预览后，这里会显示模板卡片。</div>
+                )}
+                <div className="mt-4 grid gap-4">
+                  <Field label="预览 Card JSON"><Area rows={16} readOnly value={formatJson(cardPreviewCard || {})} /></Field>
+                  <Field label="调试信息"><Area rows={8} readOnly value={formatJson(cardPreviewDebug || {})} /></Field>
+                  <Field label="动作验证结果"><Area rows={8} readOnly value={cardPreviewActionText || '点击预览卡片里的动作按钮后，这里会显示最终发送内容。'} /></Field>
+                </div>
+              </Surface>
             </div>
-          )}
-        </Surface>
+          </div>
+        </div>
       ) : (
-        <Surface className="p-6 text-sm text-slate-500">暂无卡片协议</Surface>
+        <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
+          <ResourceList title="卡片协议" items={consoleData.cardCatalog} selectedKey={cardId} onSelect={setCardId} getKey={item => item.id} getTitle={item => item.card_type} getMeta={item => `${item.source_kind} · ${item.source_name}`} />
+          {selectedCard ? (
+            <Surface className="p-6">
+              <div className="mb-5 flex items-center justify-between">
+                <div className="text-lg font-semibold text-slate-900">{selectedCard.card_type}</div>
+                {selectedCard.source_kind === 'tool' ? (
+                  <button onClick={() => { setToolName(selectedCard.source_name); setView('tools') }} className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">去工具配置</button>
+                ) : (
+                  <button onClick={() => { setSkillName(selectedCard.source_name); setView('skills') }} className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">去技能配置</button>
+                )}
+              </div>
+
+              {cardTemplates.length > 0 && (
+                <div className="mb-5 rounded-2xl border border-slate-200 bg-[#f8fcfb] px-4 py-3 text-sm text-slate-500">
+                  可用模板：{cardTemplates.map(item => item.display_name || item.template_id).join('、')}
+                </div>
+              )}
+
+              {selectedCard.source_kind === 'tool' ? (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="md:col-span-2"><Field label="摘要"><Area rows={3} value={cardToolDraft.summary} onChange={e => setCardToolDraft(prev => ({ ...prev, summary: e.target.value }))} /></Field></div>
+                  <Field label="Card Type"><Input value={cardToolDraft.card_type} onChange={e => setCardToolDraft(prev => ({ ...prev, card_type: e.target.value }))} /></Field>
+                  <Field label="来源工具"><Input value={selectedCard.source_name} disabled /></Field>
+                  <div className="md:col-span-2"><Field label="卡片绑定 JSON"><Area rows={10} value={cardToolDraft.card_binding_text} onChange={e => setCardToolDraft(prev => ({ ...prev, card_binding_text: e.target.value }))} /></Field></div>
+                  <div className="md:col-span-2">
+                    <button onClick={() => void runAction(async () => {
+                      const base = tools.find(item => item.tool_name === selectedCard.source_name)
+                      if (!base) throw new Error('来源工具不存在')
+                      const saved = await consoleData.saveTool({
+                        ...base,
+                        summary: cardToolDraft.summary.trim(),
+                        supports_card: true,
+                        card_type: cardToolDraft.card_type.trim(),
+                        card_binding: parseJsonText(cardToolDraft.card_binding_text, {}, '卡片绑定'),
+                      })
+                      setCardId(`tool:${saved.tool_name}:${saved.card_type || 'bound'}`)
+                    }, '卡片协议已保存')} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600"><Save size={14} />保存卡片配置</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="md:col-span-2"><Field label="摘要"><Area rows={3} value={cardSkillDraft.summary} onChange={e => setCardSkillDraft(prev => ({ ...prev, summary: e.target.value }))} /></Field></div>
+                  <Field label="来源技能"><Input value={selectedCard.source_name} disabled /></Field>
+                  <Field label="卡片类型"><Area rows={8} value={cardSkillDraft.card_types_text} onChange={e => setCardSkillDraft(prev => ({ ...prev, card_types_text: e.target.value }))} /></Field>
+                  <div className="md:col-span-2">
+                    <button onClick={() => void runAction(async () => {
+                      const base = skills.find(item => item.skill_name === selectedCard.source_name)
+                      if (!base) throw new Error('来源技能不存在')
+                      const saved = await consoleData.saveSkill({
+                        ...base,
+                        summary: cardSkillDraft.summary.trim(),
+                        card_types: cardSkillDraft.card_types_text.split(/[\n,]/g).map(item => item.trim()).filter(Boolean),
+                      })
+                      setCardId(`skill:${saved.skill_name}:${saved.card_types[0] || selectedCard.card_type}`)
+                    }, '卡片协议已保存')} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600"><Save size={14} />保存卡片配置</button>
+                  </div>
+                </div>
+              )}
+            </Surface>
+          ) : (
+            <Surface className="p-6 text-sm text-slate-500">暂无卡片协议</Surface>
+          )}
+        </div>
       )}
     </div>
   )

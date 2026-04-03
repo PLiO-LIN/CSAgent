@@ -1,4 +1,6 @@
 import type { ChatSendHandler } from '../lib/chatDisplay'
+import TemplateCardRenderer from './TemplateCardRenderer'
+import { isTemplateCard } from '../lib/cardTemplateRuntime'
 
 interface Props {
   card: any
@@ -82,6 +84,10 @@ function renderValue(label: string, value: unknown, depth = 0): JSX.Element | nu
 }
 
 export default function CardRenderer({ card, onAction }: Props) {
+  if (isTemplateCard(card)) {
+    return <TemplateCardRenderer card={card} onAction={onAction} />
+  }
+
   const payload = isPlainObject(card) ? card : { value: card }
   const title = String(payload.title || payload.name || payload.display_name || payload.type || 'Card').trim()
   const subtitle = String(payload.summary || payload.description || '').trim()

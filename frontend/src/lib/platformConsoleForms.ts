@@ -3,6 +3,7 @@ import type { FrameworkInfo } from '../hooks/useFrameworkProfile'
 export type AgentRecord = FrameworkInfo['agents'][number]
 export type ToolRecord = FrameworkInfo['tools'][number]
 export type SkillRecord = FrameworkInfo['skills'][number]
+export type CardTemplateRecord = FrameworkInfo['card_templates'][number]
 
 export interface AgentForm {
   agent_id: string
@@ -59,11 +60,41 @@ export interface SkillForm {
   metadata_text: string
 }
 
+export interface CardTemplateForm {
+  template_id: string
+  display_name: string
+  summary: string
+  enabled: boolean
+  template_type: string
+  renderer_key: string
+  data_schema_text: string
+  ui_schema_text: string
+  action_schema_text: string
+  sample_payload_text: string
+  metadata_text: string
+}
+
 export function formatJson(value: unknown) {
   try {
     return JSON.stringify(value ?? {}, null, 2)
   } catch {
     return '{}'
+  }
+}
+
+export function createCardTemplateForm(record?: Partial<CardTemplateRecord>): CardTemplateForm {
+  return {
+    template_id: String(record?.template_id || ''),
+    display_name: String(record?.display_name || ''),
+    summary: String(record?.summary || ''),
+    enabled: Boolean(record?.enabled ?? true),
+    template_type: String(record?.template_type || 'info_detail'),
+    renderer_key: String(record?.renderer_key || ''),
+    data_schema_text: formatJson(record?.data_schema || {}),
+    ui_schema_text: formatJson(record?.ui_schema || {}),
+    action_schema_text: formatJson(record?.action_schema || {}),
+    sample_payload_text: formatJson(record?.sample_payload || {}),
+    metadata_text: formatJson(record?.metadata || {}),
   }
 }
 
@@ -133,6 +164,22 @@ export function agentFormToPayload(form: AgentForm): AgentRecord {
     },
     tool_policy_config: parseJsonText(form.tool_policy_config_text, {}, '工具策略'),
     memory_config: parseJsonText(form.memory_config_text, {}, '记忆配置'),
+    metadata: parseJsonText(form.metadata_text, {}, '附加信息'),
+  }
+}
+
+export function cardTemplateFormToPayload(form: CardTemplateForm): CardTemplateRecord {
+  return {
+    template_id: form.template_id.trim(),
+    display_name: form.display_name.trim() || form.template_id.trim(),
+    summary: form.summary.trim(),
+    enabled: form.enabled,
+    template_type: form.template_type.trim() || 'info_detail',
+    renderer_key: form.renderer_key.trim(),
+    data_schema: parseJsonText(form.data_schema_text, {}, '数据 Schema'),
+    ui_schema: parseJsonText(form.ui_schema_text, {}, 'UI Schema'),
+    action_schema: parseJsonText(form.action_schema_text, {}, '动作 Schema'),
+    sample_payload: parseJsonText(form.sample_payload_text, {}, '样例 Payload'),
     metadata: parseJsonText(form.metadata_text, {}, '附加信息'),
   }
 }

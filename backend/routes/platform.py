@@ -1,27 +1,41 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from card.runtime import build_template_card
 from db.engine import get_db
 from platform_registry import (
     PlatformAgentRecord,
+    PlatformCardTemplateRecord,
     PlatformSkillRecord,
     PlatformToolRecord,
     get_agent_record,
+    get_card_template_record,
     get_registry_snapshot,
     list_agent_records,
+    list_card_template_records,
     list_skill_records,
     list_tool_records,
     publish_agent,
     sync_local_tools_into_registry,
     sync_mcp_tools_into_registry,
     upsert_agent_record,
+    upsert_card_template_record,
     upsert_skill_record,
     upsert_tool_record,
 )
 
 router = APIRouter(prefix="/api/platform", tags=["platform"])
+
+
+class CardPreviewReq(BaseModel):
+    template: PlatformCardTemplateRecord
+    source_payload: dict[str, Any] = Field(default_factory=dict)
+    binding: dict[str, Any] = Field(default_factory=dict)
 
 
 @router.get("/snapshot")
@@ -57,6 +71,37 @@ async def update_tool(tool_name: str, payload: PlatformToolRecord, db: AsyncSess
     data = payload.model_copy(update={"tool_name": tool_name})
     record = await upsert_tool_record(db, data)
     return record.model_dump(by_alias=True)
+
+
+@router.get("/card-templates")
+async def platform_card_templates(include_disabled: bool = False):
+    return [record.model_dump(by_alias=True) for record in list_card_template_records(include_disabled=include_disabled)]
+
+
+@router.get("/card-templates/{template_id}")
+async def platform_card_template(template_id: str):
+    record = get_card_template_record(template_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Card template not found")
+    return record.model_dump(by_alias=True)
+
+
+@router.post("/card-templates")
+async def create_card_template(payload: PlatformCardTemplateRecord, db: AsyncSession = Depends(get_db)):
+    record = await upsert_card_template_record(db, payload)
+    return record.model_dump(by_alias=True)
+
+
+@router.put("/card-templates/{template_id}")
+async def update_card_template(template_id: str, payload: PlatformCardTemplateRecord, db: AsyncSession = Depends(get_db)):
+    data = payload.model_copy(update={"template_id": template_id})
+    record = await upsert_card_template_record(db, data)
+    return record.model_dump(by_alias=True)
+
+
+@router.post("/cards/preview")
+async def preview_card(payload: CardPreviewReq):
+    return build_template_card(payload.template, payload.source_payload, payload.binding)
 
 
 @router.get("/skills")

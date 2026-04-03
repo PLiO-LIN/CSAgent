@@ -66,7 +66,7 @@ class Base(DeclarativeBase):
 
 async def init_db():
     async with engine.begin() as conn:
-        from db.models import SessionModel, MessageModel, PartModel, LLMRequestModel, AgentEventLogModel  # noqa: F401
+        from db.models import SessionModel, MessageModel, PartModel, LLMRequestModel, AgentEventLogModel, PlatformToolModel, PlatformSkillModel, PlatformAgentModel, PlatformCardTemplateModel  # noqa: F401
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_schema_patches)
 
