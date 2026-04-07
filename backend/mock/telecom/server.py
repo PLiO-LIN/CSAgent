@@ -16,10 +16,9 @@
   python -m backend.mock.telecom.server          # 默认 SSE, port 9100
   python -m backend.mock.telecom.server --stdio   # stdio 模式
 """
-from __future__ import annotations
-
 import argparse
 import base64
+import inspect
 import os
 import sys
 from typing import Any
@@ -49,6 +48,7 @@ mcp = FastMCP(
     "telecom-mock",
     instructions="电信客服模拟 MCP 服务器，提供客户查询、余额、用量、账单、积分、订购、推荐、下单、知识库搜索等工具。",
 )
+_FASTMCP_TOOL_KWARGS = set(inspect.signature(FastMCP.tool).parameters.keys())
 
 
 def _icon_payload(label: str, color: str) -> dict[str, Any]:
@@ -94,12 +94,20 @@ def _tool_contract(
             "cardType": card_type or template_id,
             "source": "structuredContent",
         }
-    return {
-        "title": title,
-        "description": description,
-        "meta": meta,
-        "structured_output": True,
-    }
+    contract: dict[str, Any] = {}
+    if "title" in _FASTMCP_TOOL_KWARGS:
+        contract["title"] = title
+    if "description" in _FASTMCP_TOOL_KWARGS:
+        contract["description"] = description
+    if "structured_output" in _FASTMCP_TOOL_KWARGS:
+        contract["structured_output"] = True
+    if "meta" in _FASTMCP_TOOL_KWARGS:
+        contract["meta"] = meta
+    if "icons" in _FASTMCP_TOOL_KWARGS:
+        icons = _tool_icons(icon_label, icon_color)
+        if icons:
+            contract["icons"] = icons
+    return contract
 
 
 def _fen_text(value: Any) -> str:
