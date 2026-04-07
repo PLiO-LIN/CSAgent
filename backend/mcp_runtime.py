@@ -24,6 +24,19 @@ from tool.base import ToolEntry, ToolPolicy, ToolResult, set_dynamic_tool_provid
 logger = logging.getLogger(__name__)
 
 
+def _model_dump_dict(value: Any) -> dict[str, Any]:
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        try:
+            payload = model_dump(mode="json", exclude_none=True)
+        except Exception:
+            return {}
+        return dict(payload) if isinstance(payload, dict) else {}
+    if isinstance(value, dict):
+        return dict(value)
+    return {}
+
+
 @dataclass
 class _ServerConnection:
     name: str
@@ -140,6 +153,7 @@ class McpToolRuntime:
         entries: dict[str, ToolEntry] = {}
         include = {str(name).strip() for name in connection.config.include_tools if str(name).strip()}
         exclude = {str(name).strip() for name in connection.config.exclude_tools if str(name).strip()}
+        capabilities = _model_dump_dict(connection.capabilities)
         for tool in tools:
             raw_name = str(tool.name or "").strip()
             if not raw_name:
@@ -155,7 +169,19 @@ class McpToolRuntime:
             parameters = self._normalize_schema(tool.inputSchema)
             output_schema = self._normalize_json_schema(getattr(tool, "outputSchema", None))
             tool_meta = dict(getattr(tool, "meta", None) or {})
+            tool_annotations = _model_dump_dict(getattr(tool, "annotations", None))
             icons = extract_tool_icons(tool_meta, getattr(tool, "icons", None))
+            entry_metadata = {
+                "mcp_protocol_meta": tool_meta,
+                "mcp_raw_tool_name": raw_name,
+                "mcp_transport": str(connection.config.transport or "").strip().lower() or "stdio",
+                "mcp_server_info": dict(connection.server_info or {}),
+                "mcp_server_instructions": str(connection.instructions or ""),
+            }
+            if capabilities:
+                entry_metadata["mcp_server_capabilities"] = capabilities
+            if tool_annotations:
+                entry_metadata["mcp_tool_annotations"] = tool_annotations
 
             async def _executor(
                 _server_name: str = connection.name,
@@ -174,10 +200,7 @@ class McpToolRuntime:
                 policy=policy,
                 source=f"mcp:{connection.name}",
                 output_schema=output_schema,
-                metadata={
-                    "mcp_protocol_meta": tool_meta,
-                    "mcp_raw_tool_name": raw_name,
-                },
+                metadata=entry_metadata,
                 icons=icons,
             )
             occupied_names.add(public_name)
@@ -386,8 +409,18 @@ class McpToolRuntime:
             "mcp_server": server_name,
             "mcp_tool_name": tool_name,
         }
+        connection = self._servers.get(server_name)
+        if connection is not None:
+            metadata["mcp_transport"] = str(connection.config.transport or "").strip().lower() or "stdio"
+            if connection.server_info:
+                metadata["mcp_server_info"] = dict(connection.server_info or {})
+            if connection.instructions:
+                metadata["mcp_server_instructions"] = str(connection.instructions or "")
+            capabilities = _model_dump_dict(connection.capabilities)
+            if capabilities:
+                metadata["mcp_server_capabilities"] = capabilities
         if result.meta:
-            metadata["mcp_meta"] = result.meta
+            metadata["mcp_meta"] = dict(result.meta or {})
         if result.structuredContent is not None:
             metadata["mcp_structured_content"] = result.structuredContent
         if result.isError:
@@ -473,6 +506,7 @@ async def inspect_mcp_server(server_name: str, config: McpServerSettings) -> dic
                 "output_schema": dict(getattr(entry, "output_schema", {}) or {}),
                 "scope": str(getattr(entry, "scope", "global") or "global"),
                 "icons": [dict(item) for item in (getattr(entry, "icons", None) or []) if isinstance(item, dict)],
+                "annotations": dict(runtime_meta.get("mcp_tool_annotations", {}) or {}),
                 "meta_keys": sorted(protocol_meta.keys()),
                 "supports_card": bool(extract_tool_card_binding(protocol_meta)),
                 "card_type": extract_tool_card_type(protocol_meta),
@@ -483,6 +517,7 @@ async def inspect_mcp_server(server_name: str, config: McpServerSettings) -> dic
             "transport": str(config.transport or "stdio").strip().lower() or "stdio",
             "server_info": dict(connection.server_info or {}),
             "instructions": str(connection.instructions or ""),
+            "capabilities": _model_dump_dict(connection.capabilities),
             "count": len(tools),
             "tools": tools,
         }

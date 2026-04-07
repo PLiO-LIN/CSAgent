@@ -20,9 +20,14 @@ import argparse
 import asyncio
 import base64
 import inspect
+import json
 import os
 import sys
+from contextlib import AsyncExitStack
 from typing import Any
+
+import anyio
+import jsonschema
 
 # 确保项目根目录在 sys.path 中
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -33,6 +38,7 @@ from mcp import types
 from mcp.server import Server
 from mcp.server.sse import SseServerTransport
 from mcp.server.stdio import stdio_server
+from mcp.server.streamable_http import StreamableHTTPServerTransport
 from starlette.responses import PlainTextResponse
 
 from backend.mcp_card_contract import CSAGENT_CARD_META_KEY, CSAGENT_ICONS_META_KEY
@@ -90,17 +96,80 @@ class _CompatMCP:
         self.sse_transport = SseServerTransport("/messages")
         self._tools: list[types.Tool] = []
         self._handlers: dict[str, Any] = {}
+        self._streamable_http_transport: StreamableHTTPServerTransport | None = None
+        self._app_exit_stack: AsyncExitStack | None = None
 
         @self.server.list_tools()
         async def _list_tools() -> list[types.Tool]:
             return list(self._tools)
 
-        @self.server.call_tool()
-        async def _call_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-            handler = self._handlers.get(str(tool_name or "").strip())
+        self.server.request_handlers[types.CallToolRequest] = self._handle_call_tool_request
+
+    async def _handle_call_tool_request(self, req: types.CallToolRequest) -> types.ServerResult:
+        try:
+            tool_name = str(req.params.name or "").strip()
+            arguments = dict(req.params.arguments or {})
+            tool = await self.server._get_cached_tool_definition(tool_name)
+            if tool is None:
+                raise ValueError(f"Unknown tool: {tool_name}")
+            try:
+                jsonschema.validate(instance=arguments, schema=tool.inputSchema)
+            except jsonschema.ValidationError as exc:
+                return self.server._make_error_result(f"Input validation error: {exc.message}")
+            handler = self._handlers.get(tool_name)
             if handler is None:
                 raise ValueError(f"Unknown tool: {tool_name}")
-            return handler(**dict(arguments or {}))
+            result = handler(**arguments)
+            if inspect.isawaitable(result):
+                result = await result
+            return types.ServerResult(self._normalize_tool_result(tool, result))
+        except Exception as exc:
+            return self.server._make_error_result(str(exc))
+
+    def _normalize_tool_result(self, tool: types.Tool | None, result: Any) -> types.CallToolResult:
+        if isinstance(result, types.CallToolResult):
+            normalized = result
+        else:
+            structured_content: dict[str, Any] | None
+            if isinstance(result, tuple) and len(result) == 2:
+                unstructured_raw, structured_content = result
+                if not isinstance(structured_content, dict):
+                    raise ValueError("Structured output must be a JSON object")
+                unstructured_content = list(unstructured_raw)
+            elif isinstance(result, dict):
+                structured_content = dict(result)
+                unstructured_content = [
+                    types.TextContent(
+                        type="text",
+                        text=json.dumps(structured_content, ensure_ascii=False, indent=2),
+                    )
+                ]
+            elif isinstance(result, (str, int, float, bool)) or result is None:
+                structured_content = {"result": result}
+                unstructured_content = [
+                    types.TextContent(
+                        type="text",
+                        text=json.dumps(structured_content, ensure_ascii=False, indent=2),
+                    )
+                ]
+            elif hasattr(result, "__iter__"):
+                structured_content = None
+                unstructured_content = list(result)
+            else:
+                raise ValueError(f"Unexpected return type from tool: {type(result).__name__}")
+            normalized = types.CallToolResult(
+                content=list(unstructured_content),
+                structuredContent=structured_content,
+                isError=False,
+            )
+        if tool and tool.outputSchema is not None:
+            if normalized.structuredContent is None:
+                raise ValueError("Output validation error: outputSchema defined but no structured output returned")
+            try:
+                jsonschema.validate(instance=normalized.structuredContent, schema=tool.outputSchema)
+            except jsonschema.ValidationError as exc:
+                raise ValueError(f"Output validation error: {exc.message}") from exc
+        return normalized
 
     def tool(
         self,
@@ -108,6 +177,7 @@ class _CompatMCP:
         title: str | None = None,
         description: str | None = None,
         meta: dict[str, Any] | None = None,
+        annotations: types.ToolAnnotations | None = None,
         structured_output: bool | None = None,
         **_: Any,
     ):
@@ -119,6 +189,7 @@ class _CompatMCP:
                 description=str(description or "").strip() or None,
                 inputSchema=_build_input_schema(func),
                 outputSchema={"type": "object"} if structured_output is not False else None,
+                annotations=annotations,
                 _meta=dict(meta or {}),
             )
             self._tools.append(tool)
@@ -131,19 +202,97 @@ class _CompatMCP:
         async with stdio_server() as (read_stream, write_stream):
             await self.server.run(read_stream, write_stream, self.server.create_initialization_options())
 
+    async def _startup(self) -> None:
+        if self._app_exit_stack is not None:
+            return
+        exit_stack = AsyncExitStack()
+        try:
+            transport = StreamableHTTPServerTransport(
+                mcp_session_id=None,
+                is_json_response_enabled=True,
+            )
+            task_group = await exit_stack.enter_async_context(anyio.create_task_group())
+            read_stream, write_stream = await exit_stack.enter_async_context(transport.connect())
+            self._streamable_http_transport = transport
+
+            async def _run_streamable_http() -> None:
+                await self.server.run(
+                    read_stream,
+                    write_stream,
+                    self.server.create_initialization_options(),
+                    stateless=True,
+                )
+
+            task_group.start_soon(_run_streamable_http)
+            self._app_exit_stack = exit_stack
+        except Exception:
+            self._streamable_http_transport = None
+            await exit_stack.aclose()
+            raise
+
+    async def _shutdown(self) -> None:
+        exit_stack = self._app_exit_stack
+        self._app_exit_stack = None
+        transport = self._streamable_http_transport
+        self._streamable_http_transport = None
+        if transport is not None:
+            terminate = getattr(transport, "terminate", None)
+            if callable(terminate):
+                maybe_result = terminate()
+                if inspect.isawaitable(maybe_result):
+                    await maybe_result
+        if exit_stack is not None:
+            await exit_stack.aclose()
+
+    async def _handle_lifespan(self, receive: Any, send: Any) -> None:
+        while True:
+            message = await receive()
+            message_type = str(message.get("type") or "")
+            if message_type == "lifespan.startup":
+                try:
+                    await self._startup()
+                except Exception as exc:
+                    await send({"type": "lifespan.startup.failed", "message": str(exc)})
+                    return
+                await send({"type": "lifespan.startup.complete"})
+                continue
+            if message_type == "lifespan.shutdown":
+                try:
+                    await self._shutdown()
+                except Exception as exc:
+                    await send({"type": "lifespan.shutdown.failed", "message": str(exc)})
+                    return
+                await send({"type": "lifespan.shutdown.complete"})
+                return
+
     async def asgi_app(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") == "lifespan":
+            await self._handle_lifespan(receive, send)
+            return
         if scope.get("type") != "http":
             response = PlainTextResponse("Unsupported scope type", status_code=500)
             await response(scope, receive, send)
             return
         method = str(scope.get("method") or "").upper()
         path = str(scope.get("path") or "").rstrip("/") or "/"
+        if path == "/" and method == "GET":
+            response = PlainTextResponse("telecom-mock MCP server ready: /sse /mcp", status_code=200)
+            await response(scope, receive, send)
+            return
         if path == "/sse" and method == "GET":
             async with self.sse_transport.connect_sse(scope, receive, send) as (read_stream, write_stream):
                 await self.server.run(read_stream, write_stream, self.server.create_initialization_options())
             return
         if path == "/messages" and method == "POST":
             await self.sse_transport.handle_post_message(scope, receive, send)
+            return
+        if path == "/mcp":
+            transport = self._streamable_http_transport
+            if transport is None:
+                response = PlainTextResponse("Streamable HTTP transport not initialized", status_code=503)
+                await response(scope, receive, send)
+                return
+            await transport.handle_request(scope, receive, send)
             return
         response = PlainTextResponse("Not Found", status_code=404)
         await response(scope, receive, send)
@@ -178,6 +327,19 @@ def _tool_icons(label: str, color: str) -> list[Any] | None:
     return [icon_cls(src=payload["src"], mimeType=payload["mimeType"], sizes=payload["sizes"])]
 
 
+def _tool_annotations(
+    read_only: bool = True,
+    destructive: bool = False,
+    idempotent: bool | None = None,
+) -> types.ToolAnnotations:
+    return types.ToolAnnotations(
+        readOnlyHint=bool(read_only),
+        destructiveHint=bool(destructive),
+        idempotentHint=(not destructive) if idempotent is None else bool(idempotent),
+        openWorldHint=False,
+    )
+
+
 def _tool_contract(
     title: str,
     description: str,
@@ -185,6 +347,9 @@ def _tool_contract(
     icon_color: str,
     template_id: str = "",
     card_type: str = "",
+    read_only: bool = True,
+    destructive: bool = False,
+    idempotent: bool | None = None,
 ) -> dict[str, Any]:
     icon_payload = _icon_payload(icon_label, icon_color)
     meta: dict[str, Any] = {
@@ -202,6 +367,7 @@ def _tool_contract(
         "title": title,
         "description": description,
         "meta": meta,
+        "annotations": _tool_annotations(read_only=read_only, destructive=destructive, idempotent=idempotent),
         "structured_output": True,
     }
 
@@ -419,6 +585,9 @@ def recommend_packages_tool(phone: str, need_type: str = "") -> dict[str, Any]:
     description="订购下单。输入手机号、产品ID和产品名称，提交订购。返回订单号和状态。",
     icon_label="O",
     icon_color="#be123c",
+    read_only=False,
+    destructive=True,
+    idempotent=False,
 ))
 def submit_order(phone: str, offer_id: str, offer_name: str = "") -> dict[str, Any]:
     result = _submit_order(phone, offer_id, offer_name or None)
@@ -448,7 +617,7 @@ def main():
         asyncio.run(mcp.run_stdio())
     else:
         import uvicorn
-        print(f"🚀 电信客服模拟 MCP 服务器启动: http://127.0.0.1:{args.port}/sse")
+        print(f"🚀 电信客服模拟 MCP 服务器启动: SSE=http://127.0.0.1:{args.port}/sse  HTTP=http://127.0.0.1:{args.port}/mcp")
         uvicorn.run(mcp.asgi_app, host="127.0.0.1", port=args.port, log_level="info")
 
 
