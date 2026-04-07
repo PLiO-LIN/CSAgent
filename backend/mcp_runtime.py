@@ -18,6 +18,7 @@ from mcp.client.streamable_http import streamablehttp_client
 from mcp.client.websocket import websocket_client
 
 from config import McpServerSettings, settings
+from mcp_card_contract import extract_tool_card_binding, extract_tool_card_type, extract_tool_icons
 from tool.base import ToolEntry, ToolPolicy, ToolResult, set_dynamic_tool_provider
 
 logger = logging.getLogger(__name__)
@@ -152,6 +153,9 @@ class McpToolRuntime:
             policy = self._build_policy(connection.name, connection.config, tool)
             description = self._build_description(connection.name, tool)
             parameters = self._normalize_schema(tool.inputSchema)
+            output_schema = self._normalize_json_schema(getattr(tool, "outputSchema", None))
+            tool_meta = dict(getattr(tool, "meta", None) or {})
+            icons = extract_tool_icons(tool_meta, getattr(tool, "icons", None))
 
             async def _executor(
                 _server_name: str = connection.name,
@@ -162,12 +166,19 @@ class McpToolRuntime:
 
             entries[public_name] = ToolEntry(
                 name=public_name,
+                title=str(getattr(tool, "title", "") or "").strip(),
                 description=description,
                 parameters=parameters,
                 func=_executor,
                 scope=connection.config.scope,
                 policy=policy,
                 source=f"mcp:{connection.name}",
+                output_schema=output_schema,
+                metadata={
+                    "mcp_protocol_meta": tool_meta,
+                    "mcp_raw_tool_name": raw_name,
+                },
+                icons=icons,
             )
             occupied_names.add(public_name)
         logger.info("MCP server %s discovered %s tools", connection.name, len(entries))
@@ -348,6 +359,11 @@ class McpToolRuntime:
             normalized["additionalProperties"] = True
         return normalized
 
+    def _normalize_json_schema(self, schema: Any) -> dict[str, Any]:
+        if not isinstance(schema, dict):
+            return {}
+        return dict(schema)
+
     def _normalize_segment(self, value: str) -> str:
         text = re.sub(r"[^0-9A-Za-z_-]+", "_", str(value or "").strip())
         text = re.sub(r"_+", "_", text).strip("_")
@@ -435,3 +451,44 @@ async def ensure_mcp_tools_loaded(force: bool = False) -> None:
 
 async def shutdown_mcp_runtime() -> None:
     await _runtime.shutdown()
+
+
+async def inspect_mcp_server(server_name: str, config: McpServerSettings) -> dict[str, Any]:
+    runtime = McpToolRuntime()
+    target_name = str(server_name or "probe").strip() or "probe"
+    connection: _ServerConnection | None = None
+    try:
+        connection = await runtime._connect_server(target_name, config)
+        entries = await runtime._discover_server_entries(connection, occupied_names=set())
+        tools: list[dict[str, Any]] = []
+        for entry in sorted(entries.values(), key=lambda item: item.name):
+            runtime_meta = dict(getattr(entry, "metadata", {}) or {})
+            protocol_meta = dict(runtime_meta.get("mcp_protocol_meta", {}) or {})
+            tools.append({
+                "public_name": entry.name,
+                "raw_name": str(runtime_meta.get("mcp_raw_tool_name", "") or "").strip(),
+                "title": str(getattr(entry, "title", "") or "").strip(),
+                "description": str(getattr(entry, "description", "") or ""),
+                "input_schema": dict(getattr(entry, "parameters", {}) or {}),
+                "output_schema": dict(getattr(entry, "output_schema", {}) or {}),
+                "scope": str(getattr(entry, "scope", "global") or "global"),
+                "icons": [dict(item) for item in (getattr(entry, "icons", None) or []) if isinstance(item, dict)],
+                "meta_keys": sorted(protocol_meta.keys()),
+                "supports_card": bool(extract_tool_card_binding(protocol_meta)),
+                "card_type": extract_tool_card_type(protocol_meta),
+            })
+        return {
+            "ok": True,
+            "server_name": target_name,
+            "transport": str(config.transport or "stdio").strip().lower() or "stdio",
+            "server_info": dict(connection.server_info or {}),
+            "instructions": str(connection.instructions or ""),
+            "count": len(tools),
+            "tools": tools,
+        }
+    finally:
+        if connection is not None:
+            try:
+                await connection.exit_stack.aclose()
+            except Exception:
+                logger.exception("Failed to close probed MCP server %s", target_name)

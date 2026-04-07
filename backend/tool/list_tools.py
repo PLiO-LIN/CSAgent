@@ -16,6 +16,11 @@ from tool.base import tool, ToolResult
         "risk_level": "low",
         "confirm_policy": "never",
     },
+    metadata={
+        "internal": True,
+        "admin_hidden": True,
+        "managed_by": "platform_runtime",
+    },
 )
 async def list_tools() -> ToolResult:
     tools = list_visible_tool_records()

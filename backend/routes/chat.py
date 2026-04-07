@@ -11,11 +11,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _normalize_agent_variable_values(values: dict | None) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for key, value in dict(values or {}).items():
+        name = str(key or "").strip()
+        if not name:
+            continue
+        result[name] = str(value or "").strip()
+    return result
+
+
 class ChatMessage(BaseModel):
     session_id: str = ""
     content: str = ""
     agent_id: str = ""
     client_meta: dict = Field(default_factory=dict)
+    agent_variables: dict = Field(default_factory=dict)
 
 
 @router.websocket("/ws/chat")
@@ -33,9 +44,13 @@ async def chat_ws(ws: WebSocket):
                     msg.session_id = session.id
                     if msg.agent_id:
                         await crud.update_session_metadata(db, msg.session_id, {"agent_id": msg.agent_id})
+                    if msg.agent_variables:
+                        await crud.update_session_metadata(db, msg.session_id, {"agent_variables": _normalize_agent_variable_values(msg.agent_variables)})
                     await ws.send_text(json.dumps({"type": "session", "session_id": session.id}, ensure_ascii=False))
                 elif msg.agent_id:
                     await crud.update_session_metadata(db, msg.session_id, {"agent_id": msg.agent_id})
+                if msg.agent_variables:
+                    await crud.update_session_metadata(db, msg.session_id, {"agent_variables": _normalize_agent_variable_values(msg.agent_variables)})
 
                 if msg.content:
                     await crud.add_message(db, msg.session_id, "user", [
@@ -69,6 +84,7 @@ class ChatRequest(BaseModel):
     phone: str = ""
     agent_id: str = ""
     client_meta: dict = Field(default_factory=dict)
+    agent_variables: dict = Field(default_factory=dict)
     stream: bool = False
 
 
@@ -127,12 +143,16 @@ async def _prepare_chat_turn(db, req: ChatRequest) -> tuple[str, bool]:
             await crud.update_session_metadata(db, sid, {"phone": req.phone})
         if req.agent_id:
             await crud.update_session_metadata(db, sid, {"agent_id": req.agent_id})
+        if req.agent_variables:
+            await crud.update_session_metadata(db, sid, {"agent_variables": _normalize_agent_variable_values(req.agent_variables)})
     elif req.phone:
         existing_phone = await crud.get_session_phone(db, sid)
         if not existing_phone:
             await crud.update_session_metadata(db, sid, {"phone": req.phone})
     if req.agent_id:
         await crud.update_session_metadata(db, sid, {"agent_id": req.agent_id})
+    if req.agent_variables:
+        await crud.update_session_metadata(db, sid, {"agent_variables": _normalize_agent_variable_values(req.agent_variables)})
 
     await crud.add_message(db, sid, "user", [
         {

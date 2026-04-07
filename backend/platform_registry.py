@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import PlatformAgentModel, PlatformCardTemplateModel, PlatformSkillModel, PlatformToolModel
 from framework_profile import load_framework_profile
+from mcp_card_contract import extract_tool_card_binding, extract_tool_card_type, extract_tool_icons
 from runtime_scope import current_runtime_scope
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,21 @@ class PlatformSkillRecord(BaseModel):
     updated_at: float = 0
 
 
+class AgentVariableField(BaseModel):
+    key: str
+    label: str = ""
+    description: str = ""
+    default_value: str = ""
+    required: bool = False
+    inject_to_prompt: bool = False
+
+
+class AgentToolBindingField(BaseModel):
+    tool_name: str
+    arg_name: str
+    variable_key: str
+
+
 class PlatformAgentRecord(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -69,6 +85,8 @@ class PlatformAgentRecord(BaseModel):
     memory_prompt: str = ""
     global_tool_names: list[str] = Field(default_factory=list)
     skill_names: list[str] = Field(default_factory=list)
+    agent_variables: list[AgentVariableField] = Field(default_factory=list)
+    tool_arg_bindings: list[AgentToolBindingField] = Field(default_factory=list)
     model_settings: dict[str, Any] = Field(default_factory=dict, alias="model_config")
     tool_policy_config: dict[str, Any] = Field(default_factory=dict)
     memory_config: dict[str, Any] = Field(default_factory=dict)
@@ -106,6 +124,8 @@ class AgentRuntimeConfig(BaseModel):
     memory_prompt: str = ""
     global_tool_names: list[str] = Field(default_factory=list)
     skill_names: list[str] = Field(default_factory=list)
+    agent_variables: list[AgentVariableField] = Field(default_factory=list)
+    tool_arg_bindings: list[AgentToolBindingField] = Field(default_factory=list)
     model_settings: dict[str, Any] = Field(default_factory=dict, alias="model_config")
     tool_policy_config: dict[str, Any] = Field(default_factory=dict)
     memory_config: dict[str, Any] = Field(default_factory=dict)
@@ -261,6 +281,54 @@ def _dedupe_text_list(values: list[str] | tuple[str, ...] | set[str] | None) -> 
     return result
 
 
+def _normalize_agent_variables(values: Any) -> list[AgentVariableField]:
+    result: list[AgentVariableField] = []
+    seen: set[str] = set()
+    if not isinstance(values, list):
+        return result
+    for raw in values:
+        payload = raw.model_dump() if isinstance(raw, AgentVariableField) else (dict(raw) if isinstance(raw, dict) else None)
+        if not payload:
+            continue
+        key = str(payload.get("key") or payload.get("name") or "").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        result.append(AgentVariableField(
+            key=key,
+            label=str(payload.get("label") or payload.get("display_name") or key).strip() or key,
+            description=str(payload.get("description") or "").strip(),
+            default_value=str(payload.get("default_value") or "").strip(),
+            required=bool(payload.get("required")),
+            inject_to_prompt=bool(payload.get("inject_to_prompt") or payload.get("expose_to_prompt")),
+        ))
+    return result
+
+
+def _normalize_agent_tool_arg_bindings(values: Any, allowed_variable_keys: set[str] | None = None) -> list[AgentToolBindingField]:
+    result: list[AgentToolBindingField] = []
+    seen: set[tuple[str, str]] = set()
+    if not isinstance(values, list):
+        return result
+    for raw in values:
+        payload = raw.model_dump() if isinstance(raw, AgentToolBindingField) else (dict(raw) if isinstance(raw, dict) else None)
+        if not payload:
+            continue
+        tool_name = str(payload.get("tool_name") or "").strip()
+        arg_name = str(payload.get("arg_name") or payload.get("parameter") or "").strip()
+        variable_key = str(payload.get("variable_key") or payload.get("variable_name") or "").strip()
+        if not tool_name or not arg_name or not variable_key:
+            continue
+        if allowed_variable_keys is not None and variable_key not in allowed_variable_keys:
+            continue
+        dedupe_key = (tool_name, arg_name)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        result.append(AgentToolBindingField(tool_name=tool_name, arg_name=arg_name, variable_key=variable_key))
+    return result
+
+
 def _record_from_tool_model(model: PlatformToolModel) -> PlatformToolRecord:
     return PlatformToolRecord(
         tool_name=str(model.tool_name or "").strip(),
@@ -322,6 +390,10 @@ def _record_from_skill_model(model: PlatformSkillModel) -> PlatformSkillRecord:
 
 
 def _record_from_agent_model(model: PlatformAgentModel) -> PlatformAgentRecord:
+    metadata = dict(model.metadata_ or {})
+    agent_variables = _normalize_agent_variables(metadata.get("agent_variables"))
+    allowed_variable_keys = {item.key for item in agent_variables}
+    tool_arg_bindings = _normalize_agent_tool_arg_bindings(metadata.get("tool_arg_bindings"), allowed_variable_keys=allowed_variable_keys)
     return PlatformAgentRecord(
         agent_id=str(model.agent_id or "").strip(),
         name=str(model.name or "").strip(),
@@ -336,10 +408,12 @@ def _record_from_agent_model(model: PlatformAgentModel) -> PlatformAgentRecord:
         memory_prompt=str(model.memory_prompt or ""),
         global_tool_names=_dedupe_text_list(model.global_tool_names or []),
         skill_names=_dedupe_text_list(model.skill_names or []),
+        agent_variables=agent_variables,
+        tool_arg_bindings=tool_arg_bindings,
         model_settings=dict(model.model_config or {}),
         tool_policy_config=dict(model.tool_policy_config or {}),
         memory_config=dict(model.memory_config or {}),
-        metadata=dict(model.metadata_ or {}),
+        metadata=metadata,
         created_at=float(model.created_at or 0),
         updated_at=float(model.updated_at or 0),
     )
@@ -524,6 +598,8 @@ async def sync_local_tools_into_registry(db: AsyncSession) -> list[PlatformToolR
         if model.transport_config is None:
             model.transport_config = {}
         meta = dict(model.metadata_ or {})
+        entry_meta = dict(getattr(entry, "metadata", {}) or {})
+        meta.update(entry_meta)
         meta["managed_by"] = "local_registry"
         model.metadata_ = meta
         model.updated_at = now
@@ -557,21 +633,33 @@ async def sync_mcp_tools_into_registry(db: AsyncSession, force: bool = True) -> 
         model = await db.get(PlatformToolModel, entry.name)
         if model is None:
             model = PlatformToolModel(tool_name=entry.name, created_at=now)
-        model.display_name = entry.name
-        model.summary = str(getattr(entry, "description", "") or "")
+        runtime_meta = dict(getattr(entry, "metadata", {}) or {})
+        protocol_meta = dict(runtime_meta.get("mcp_protocol_meta", {}) or {})
+        protocol_binding = extract_tool_card_binding(protocol_meta)
+        protocol_card_type = extract_tool_card_type(protocol_meta)
+        protocol_icons = extract_tool_icons(protocol_meta, getattr(entry, "icons", None))
+        model.display_name = str(getattr(entry, "title", "") or "").strip() or model.display_name or entry.name
+        model.summary = str(getattr(entry, "description", "") or "") or model.summary or ""
         model.provider_type = "mcp"
         model.source_ref = source_ref
-        model.scope = str(getattr(entry, "scope", "global") or "global")
-        model.enabled = True
-        model.supports_card = False
-        model.card_type = ""
+        model.scope = model.scope or str(getattr(entry, "scope", "global") or "global")
+        model.enabled = True if model.created_at == now else model.enabled
+        model.supports_card = bool(protocol_binding or model.supports_card)
+        model.card_type = protocol_card_type or model.card_type or ""
         model.input_schema = dict(getattr(entry, "parameters", {}) or {})
-        model.output_schema = {}
+        model.output_schema = dict(getattr(entry, "output_schema", {}) or {}) or dict(model.output_schema or {})
         model.policy = dict(entry.policy_snapshot() if getattr(entry, "policy_snapshot", None) else {})
-        model.card_binding = {}
+        model.card_binding = dict(protocol_binding or model.card_binding or {})
         model.transport_config = {"server": source_ref.split(":", 1)[1] if ":" in source_ref else source_ref}
         existing_meta = dict(model.metadata_ or {})
         existing_meta["ingested_from"] = "mcp_runtime"
+        existing_meta["mcp_protocol_meta"] = protocol_meta
+        if protocol_icons:
+            existing_meta["icons"] = protocol_icons
+            existing_meta["mcp_tool_icons"] = protocol_icons
+        raw_tool_name = str(runtime_meta.get("mcp_raw_tool_name", "") or "").strip()
+        if raw_tool_name:
+            existing_meta["mcp_raw_tool_name"] = raw_tool_name
         model.metadata_ = existing_meta
         model.updated_at = now
         db.add(model)
@@ -714,10 +802,16 @@ async def upsert_agent_record(db: AsyncSession, payload: PlatformAgentRecord) ->
     model.memory_prompt = payload.memory_prompt
     model.global_tool_names = _dedupe_text_list(payload.global_tool_names)
     model.skill_names = _dedupe_text_list(payload.skill_names)
+    agent_variables = _normalize_agent_variables(payload.agent_variables)
+    allowed_variable_keys = {item.key for item in agent_variables}
+    tool_arg_bindings = _normalize_agent_tool_arg_bindings(payload.tool_arg_bindings, allowed_variable_keys=allowed_variable_keys)
     model.model_config = dict(payload.model_settings or {})
     model.tool_policy_config = dict(payload.tool_policy_config or {})
     model.memory_config = dict(payload.memory_config or {})
-    model.metadata_ = dict(payload.metadata or {})
+    metadata = dict(payload.metadata or {})
+    metadata["agent_variables"] = [item.model_dump() for item in agent_variables]
+    metadata["tool_arg_bindings"] = [item.model_dump() for item in tool_arg_bindings]
+    model.metadata_ = metadata
     model.updated_at = now
     db.add(model)
     await db.commit()
@@ -745,6 +839,95 @@ async def upsert_card_template_record(db: AsyncSession, payload: PlatformCardTem
     await db.commit()
     await refresh_registry_cache(db)
     return _card_template_cache[payload.template_id]
+
+
+async def delete_tool_record(db: AsyncSession, tool_name: str) -> bool:
+    key = str(tool_name or "").strip()
+    if not key:
+        return False
+    model = await db.get(PlatformToolModel, key)
+    if model is None:
+        return False
+    now = time.time()
+    skill_rows = await db.execute(select(PlatformSkillModel))
+    for skill in skill_rows.scalars().all():
+        next_tool_names = [name for name in (skill.tool_names or []) if str(name or "").strip() and str(name or "").strip() != key]
+        next_global_tool_names = [name for name in (skill.global_tool_names or []) if str(name or "").strip() and str(name or "").strip() != key]
+        if next_tool_names != list(skill.tool_names or []) or next_global_tool_names != list(skill.global_tool_names or []):
+            skill.tool_names = next_tool_names
+            skill.global_tool_names = next_global_tool_names
+            skill.updated_at = now
+            db.add(skill)
+    agent_rows = await db.execute(select(PlatformAgentModel))
+    for agent in agent_rows.scalars().all():
+        next_global_tool_names = [name for name in (agent.global_tool_names or []) if str(name or "").strip() and str(name or "").strip() != key]
+        if next_global_tool_names != list(agent.global_tool_names or []):
+            agent.global_tool_names = next_global_tool_names
+            agent.updated_at = now
+            db.add(agent)
+    await db.delete(model)
+    await db.commit()
+    await refresh_registry_cache(db)
+    return True
+
+
+async def delete_skill_record(db: AsyncSession, skill_name: str) -> bool:
+    key = str(skill_name or "").strip()
+    if not key:
+        return False
+    model = await db.get(PlatformSkillModel, key)
+    if model is None:
+        return False
+    now = time.time()
+    agent_rows = await db.execute(select(PlatformAgentModel))
+    for agent in agent_rows.scalars().all():
+        next_skill_names = [name for name in (agent.skill_names or []) if str(name or "").strip() and str(name or "").strip() != key]
+        if next_skill_names != list(agent.skill_names or []):
+            agent.skill_names = next_skill_names
+            agent.updated_at = now
+            db.add(agent)
+    await db.delete(model)
+    await db.commit()
+    await refresh_registry_cache(db)
+    return True
+
+
+async def delete_card_template_record(db: AsyncSession, template_id: str) -> bool:
+    key = str(template_id or "").strip()
+    if not key:
+        return False
+    model = await db.get(PlatformCardTemplateModel, key)
+    if model is None:
+        return False
+    now = time.time()
+    tool_rows = await db.execute(select(PlatformToolModel))
+    for tool in tool_rows.scalars().all():
+        binding = dict(tool.card_binding or {})
+        binding_template_id = str(binding.get("template_id") or binding.get("templateId") or "").strip()
+        if binding_template_id != key:
+            continue
+        tool.card_binding = {}
+        tool.updated_at = now
+        db.add(tool)
+    await db.delete(model)
+    await db.commit()
+    await refresh_registry_cache(db)
+    return True
+
+
+async def delete_agent_record(db: AsyncSession, agent_id: str) -> bool:
+    key = str(agent_id or "").strip()
+    if not key:
+        return False
+    model = await db.get(PlatformAgentModel, key)
+    if model is None:
+        return False
+    if bool(model.is_default):
+        raise ValueError("默认智能体不能删除")
+    await db.delete(model)
+    await db.commit()
+    await refresh_registry_cache(db)
+    return True
 
 
 async def publish_agent(db: AsyncSession, agent_id: str) -> PlatformAgentRecord | None:
@@ -863,6 +1046,8 @@ def resolve_agent_runtime(agent_id: str = "") -> AgentRuntimeConfig:
             memory_prompt=profile.long_term_memory.prompt,
             global_tool_names=enabled_global_tool_names,
             skill_names=enabled_skill_names,
+            agent_variables=[],
+            tool_arg_bindings=[],
             memory_config={"enabled": bool(profile.long_term_memory.enabled), "top_k": int(profile.long_term_memory.top_k or 0)},
         )
     allowed_global_tool_names = [name for name in _dedupe_text_list(agent.global_tool_names) if _tool_cache.get(name) and _tool_cache[name].enabled]
@@ -871,6 +1056,9 @@ def resolve_agent_runtime(agent_id: str = "") -> AgentRuntimeConfig:
         allowed_global_tool_names = enabled_global_tool_names
     if not allowed_skill_names and enabled_skill_names:
         allowed_skill_names = enabled_skill_names
+    agent_variables = _normalize_agent_variables(agent.agent_variables)
+    allowed_variable_keys = {item.key for item in agent_variables}
+    tool_arg_bindings = _normalize_agent_tool_arg_bindings(agent.tool_arg_bindings, allowed_variable_keys=allowed_variable_keys)
     return AgentRuntimeConfig(
         agent_id=agent.agent_id,
         name=agent.name or agent.agent_id,
@@ -882,6 +1070,8 @@ def resolve_agent_runtime(agent_id: str = "") -> AgentRuntimeConfig:
         memory_prompt=agent.memory_prompt or profile.long_term_memory.prompt,
         global_tool_names=allowed_global_tool_names,
         skill_names=allowed_skill_names,
+        agent_variables=agent_variables,
+        tool_arg_bindings=tool_arg_bindings,
         model_settings=dict(agent.model_settings or {}),
         tool_policy_config=dict(agent.tool_policy_config or {}),
         memory_config={

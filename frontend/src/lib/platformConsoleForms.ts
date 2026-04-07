@@ -5,6 +5,21 @@ export type ToolRecord = FrameworkInfo['tools'][number]
 export type SkillRecord = FrameworkInfo['skills'][number]
 export type CardTemplateRecord = FrameworkInfo['card_templates'][number]
 
+export interface AgentVariableFormField {
+  key: string
+  label: string
+  description: string
+  default_value: string
+  required: boolean
+  inject_to_prompt: boolean
+}
+
+export interface AgentToolArgBindingFormField {
+  tool_name: string
+  arg_name: string
+  variable_key: string
+}
+
 export interface AgentForm {
   agent_id: string
   name: string
@@ -14,6 +29,8 @@ export interface AgentForm {
   is_default: boolean
   global_tool_names: string[]
   skill_names: string[]
+  agent_variables: AgentVariableFormField[]
+  tool_arg_bindings: AgentToolArgBindingFormField[]
   persona_prompt: string
   model_vendor_id: string
   model_id: string
@@ -121,6 +138,13 @@ export function formatListText(values: string[]) {
 
 export function createAgentForm(record?: Partial<AgentRecord>): AgentForm {
   const modelConfig = record?.model_config || {}
+  const metadata = record?.metadata || {}
+  const rawAgentVariables = Array.isArray((record as any)?.agent_variables)
+    ? (record as any).agent_variables
+    : (Array.isArray((metadata as any)?.agent_variables) ? (metadata as any).agent_variables : [])
+  const rawToolArgBindings = Array.isArray((record as any)?.tool_arg_bindings)
+    ? (record as any).tool_arg_bindings
+    : (Array.isArray((metadata as any)?.tool_arg_bindings) ? (metadata as any).tool_arg_bindings : [])
   return {
     agent_id: String(record?.agent_id || ''),
     name: String(record?.name || ''),
@@ -130,6 +154,19 @@ export function createAgentForm(record?: Partial<AgentRecord>): AgentForm {
     is_default: Boolean(record?.is_default ?? false),
     global_tool_names: [...(record?.global_tool_names || [])],
     skill_names: [...(record?.skill_names || [])],
+    agent_variables: rawAgentVariables.map((item: any) => ({
+      key: String(item?.key || item?.name || ''),
+      label: String(item?.label || item?.display_name || item?.key || item?.name || ''),
+      description: String(item?.description || ''),
+      default_value: String(item?.default_value || ''),
+      required: Boolean(item?.required ?? false),
+      inject_to_prompt: Boolean(item?.inject_to_prompt ?? item?.expose_to_prompt ?? false),
+    })),
+    tool_arg_bindings: rawToolArgBindings.map((item: any) => ({
+      tool_name: String(item?.tool_name || ''),
+      arg_name: String(item?.arg_name || item?.parameter || ''),
+      variable_key: String(item?.variable_key || item?.variable_name || ''),
+    })),
     persona_prompt: String(record?.persona_prompt || ''),
     model_vendor_id: String((modelConfig as any)?.vendor_id || ''),
     model_id: String((modelConfig as any)?.model_id || ''),
@@ -158,6 +195,19 @@ export function agentFormToPayload(form: AgentForm): AgentRecord {
     memory_prompt: form.memory_prompt,
     global_tool_names: form.global_tool_names,
     skill_names: form.skill_names,
+    agent_variables: form.agent_variables.map(item => ({
+      key: item.key.trim(),
+      label: item.label.trim(),
+      description: item.description.trim(),
+      default_value: item.default_value.trim(),
+      required: item.required,
+      inject_to_prompt: item.inject_to_prompt,
+    })).filter(item => item.key),
+    tool_arg_bindings: form.tool_arg_bindings.map(item => ({
+      tool_name: item.tool_name.trim(),
+      arg_name: item.arg_name.trim(),
+      variable_key: item.variable_key.trim(),
+    })).filter(item => item.tool_name && item.arg_name && item.variable_key),
     model_config: {
       vendor_id: form.model_vendor_id.trim(),
       model_id: form.model_id.trim(),

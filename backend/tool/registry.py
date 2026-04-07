@@ -1,3 +1,6 @@
+import importlib
+import pkgutil
+
 import mcp_runtime  # noqa: F401
 
 from tool.base import (
@@ -21,8 +24,18 @@ def ensure_local_tools_loaded() -> None:
     global _local_tools_loaded
     if _local_tools_loaded:
         return
-    from tool import list_tools as _list_tools  # noqa: F401
-    from tool import load_skills as _load_skills  # noqa: F401
+
+    import tool as tool_package
+
+    module_names: list[str] = []
+    for module_info in pkgutil.iter_modules(tool_package.__path__):
+        name = str(module_info.name or "").strip()
+        if not name or name in {"base", "registry"} or name.startswith("_"):
+            continue
+        module_names.append(f"{tool_package.__name__}.{name}")
+
+    for module_name in sorted(module_names):
+        importlib.import_module(module_name)
 
     _local_tools_loaded = True
 

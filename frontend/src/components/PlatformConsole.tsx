@@ -61,6 +61,17 @@ function countText(value: string) {
   return String(value || '').trim().length
 }
 
+const LEGACY_ADMIN_HIDDEN_TOOL_NAMES = new Set(['load_skill', 'load_skills', 'list_skills', 'list_tools'])
+
+function isAdminVisibleTool(tool: FrameworkInfo['tools'][number]) {
+  const metadata = tool?.metadata || {}
+  const toolName = String(tool?.tool_name || '').trim()
+  if (metadata?.admin_hidden === true) return false
+  if (metadata?.internal === true) return false
+  if (LEGACY_ADMIN_HIDDEN_TOOL_NAMES.has(toolName)) return false
+  return true
+}
+
 export default function PlatformConsole({ chat, profile, info, loading, saving, error, saveProfile }: Props) {
   const consoleData = usePlatformConsole(info)
   const [tab, setTab] = useState<TabKey>('models')
@@ -70,7 +81,7 @@ export default function PlatformConsole({ chat, profile, info, loading, saving, 
   const [modelDraft, setModelDraft] = useState({ api_key: '', base_url: '', chat_model: '', embed_model: '' })
 
   const agents = info?.agents || []
-  const tools = info?.tools || []
+  const tools = (info?.tools || []).filter(isAdminVisibleTool)
   const skills = info?.skills || []
   const activeAgent = agents.find(item => item.agent_id === chat.agentId) || agents.find(item => item.is_default) || agents[0]
   const activeTool = tools.find(item => item.tool_name === toolName) || tools[0]

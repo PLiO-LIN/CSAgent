@@ -80,6 +80,19 @@ export interface FrameworkInfo {
     memory_prompt: string
     global_tool_names: string[]
     skill_names: string[]
+    agent_variables: Array<{
+      key: string
+      label: string
+      description: string
+      default_value: string
+      required: boolean
+      inject_to_prompt: boolean
+    }>
+    tool_arg_bindings: Array<{
+      tool_name: string
+      arg_name: string
+      variable_key: string
+    }>
     model_config: Record<string, any>
     tool_policy_config: Record<string, any>
     memory_config: Record<string, any>

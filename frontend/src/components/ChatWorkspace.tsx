@@ -8,6 +8,14 @@ interface Props {
     agent_id: string
     name: string
     description: string
+    agent_variables?: Array<{
+      key: string
+      label: string
+      description: string
+      default_value: string
+      required: boolean
+      inject_to_prompt: boolean
+    }>
   } | null
   chat: UseChatController
   modelReady: boolean
@@ -21,6 +29,8 @@ export default function ChatWorkspace({ agent, chat, modelReady, onBack, quickAc
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
   const prompts = (quickActions.length ? quickActions : DEFAULT_QUICK).slice(0, 3)
+  const agentVariables = agent?.agent_variables || []
+  const missingRequiredVariables = agentVariables.filter(item => item.required && !String(chat.agentVariables[item.key] || item.default_value || '').trim())
 
   const scrollKey = useMemo(() => chat.messages.map(item => `${item.id}:${item.role}:${item.content.length}:${item.streaming ? 1 : 0}`).join('|'), [chat.messages])
 
@@ -30,7 +40,7 @@ export default function ChatWorkspace({ agent, chat, modelReady, onBack, quickAc
 
   const submit = () => {
     const text = input.trim()
-    if (!text || chat.loading) return
+    if (!text || chat.loading || missingRequiredVariables.length) return
     void chat.send(text)
     setInput('')
   }
@@ -68,10 +78,45 @@ export default function ChatWorkspace({ agent, chat, modelReady, onBack, quickAc
           </label>
           <div className="text-xs text-slate-400">会话 {chat.sessionId || '未开始'}</div>
         </div>
+        {agentVariables.length > 0 && (
+          <div className="mt-4 rounded-[24px] border border-slate-200 bg-[#f8fcfb] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-medium text-slate-900">固定入参变量</div>
+                <div className="mt-1 text-xs text-slate-500">这里填写的平台变量会进入提示词或绑定到工具参数；绑定后的参数由系统自动填写，模型不能改写。</div>
+              </div>
+              {missingRequiredVariables.length > 0 && <div className="text-xs text-amber-600">还有 {missingRequiredVariables.length} 个必填变量未填写</div>}
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {agentVariables.map(item => (
+                <label key={item.key} className="space-y-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="font-medium text-slate-900">{item.label || item.key}</div>
+                    {item.required && <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] text-amber-700">必填</span>}
+                    {item.inject_to_prompt && <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] text-emerald-700">注入提示词</span>}
+                  </div>
+                  <input
+                    value={chat.agentVariables[item.key] ?? item.default_value ?? ''}
+                    onChange={e => chat.setAgentVariable(item.key, e.target.value)}
+                    placeholder={item.default_value || item.key}
+                    className="w-full rounded-2xl border border-slate-200 bg-[#f8fcfb] px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-emerald-300 focus:bg-white"
+                  />
+                  <div className="text-xs text-slate-500">{item.description || `变量键：${item.key}`}</div>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
         {!modelReady && (
           <div className="mt-4 flex items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
             <ShieldAlert size={14} />
             请先在首页配置模型密钥，否则消息会返回 401。
+          </div>
+        )}
+        {missingRequiredVariables.length > 0 && (
+          <div className="mt-4 flex items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+            <ShieldAlert size={14} />
+            请先填写必填变量：{missingRequiredVariables.map(item => item.label || item.key).join('、')}
           </div>
         )}
       </div>
@@ -87,7 +132,7 @@ export default function ChatWorkspace({ agent, chat, modelReady, onBack, quickAc
               <div className="mt-2 text-sm text-slate-500">直接发问题，或者用下面的快捷指令。</div>
               <div className="mt-6 flex flex-wrap justify-center gap-2">
                 {prompts.map(item => (
-                  <button key={item} onClick={() => void chat.send(item)} className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">
+                  <button key={item} onClick={() => { if (!missingRequiredVariables.length) void chat.send(item) }} disabled={missingRequiredVariables.length > 0} className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-40">
                     {item}
                   </button>
                 ))}
@@ -133,7 +178,7 @@ export default function ChatWorkspace({ agent, chat, modelReady, onBack, quickAc
             <div className="text-xs text-slate-400">{agent?.agent_id || '未选择智能体'}</div>
             <button
               onClick={chat.loading ? chat.stop : submit}
-              disabled={chat.loading ? false : !input.trim()}
+              disabled={chat.loading ? false : (!input.trim() || missingRequiredVariables.length > 0)}
               className="inline-flex h-11 items-center gap-2 rounded-2xl bg-emerald-500 px-4 text-sm font-medium text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {chat.loading ? <Square size={14} /> : <SendHorizontal size={16} />}

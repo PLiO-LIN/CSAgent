@@ -46,9 +46,12 @@ export interface UseChatController {
   sessionId: string
   phone: string
   agentId: string
+  agentVariables: Record<string, string>
   entityAliases: EntityAliases
   setPhone: (value: string) => void
   setAgentId: (value: string) => void
+  setAgentVariables: (values: Record<string, string>) => void
+  setAgentVariable: (key: string, value: string) => void
   send: (input: ChatSendInput) => Promise<void>
   stop: () => void
   reset: () => void
@@ -61,9 +64,29 @@ export function useChat() {
   const [sessionId, setSessionId] = useState('')
   const [phone, setPhone] = useState('')
   const [agentId, setAgentId] = useState('')
+  const [agentVariables, setAgentVariablesState] = useState<Record<string, string>>({})
   const [entityAliases, setEntityAliases] = useState<EntityAliases>({})
   const cur = useRef<ChatMessage | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+
+  const setAgentVariables = useCallback((values: Record<string, string>) => {
+    const next: Record<string, string> = {}
+    Object.entries(values || {}).forEach(([key, value]) => {
+      const name = String(key || '').trim()
+      if (!name) return
+      next[name] = String(value || '').trim()
+    })
+    setAgentVariablesState(next)
+  }, [])
+
+  const setAgentVariable = useCallback((key: string, value: string) => {
+    const name = String(key || '').trim()
+    if (!name) return
+    setAgentVariablesState(prev => ({
+      ...prev,
+      [name]: String(value || ''),
+    }))
+  }, [])
 
   const mergeEntityAliases = useCallback((aliases: EntityAliases) => {
     if (!Object.keys(aliases || {}).length) return
@@ -291,7 +314,7 @@ export function useChat() {
       const resp = await fetch('/api/chat/sse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId, content, phone, agent_id: agentId, client_meta: clientMeta }),
+        body: JSON.stringify({ session_id: sessionId, content, phone, agent_id: agentId, client_meta: clientMeta, agent_variables: agentVariables }),
         signal: ctrl.signal,
       })
 
@@ -340,7 +363,7 @@ export function useChat() {
         setLoading(false)
       }
     }
-  }, [sessionId, loading, phone, agentId, finishStreamingMessage])
+  }, [sessionId, loading, phone, agentId, agentVariables, finishStreamingMessage])
 
   const reset = useCallback(() => {
     abortRef.current?.abort()
@@ -359,5 +382,5 @@ export function useChat() {
     }))
   }, [])
 
-  return { messages, loading, sessionId, phone, agentId, entityAliases, setPhone, setAgentId, send, stop, reset, toggle }
+  return { messages, loading, sessionId, phone, agentId, agentVariables, entityAliases, setPhone, setAgentId, setAgentVariables, setAgentVariable, send, stop, reset, toggle }
 }

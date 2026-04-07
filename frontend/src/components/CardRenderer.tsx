@@ -5,6 +5,7 @@ import { isTemplateCard } from '../lib/cardTemplateRuntime'
 interface Props {
   card: any
   onAction?: ChatSendHandler
+  onInspectPath?: (path: string) => void
 }
 
 function startCase(value: string) {
@@ -83,9 +84,9 @@ function renderValue(label: string, value: unknown, depth = 0): JSX.Element | nu
   )
 }
 
-export default function CardRenderer({ card, onAction }: Props) {
+export default function CardRenderer({ card, onAction, onInspectPath }: Props) {
   if (isTemplateCard(card)) {
-    return <TemplateCardRenderer card={card} onAction={onAction} />
+    return <TemplateCardRenderer card={card} onAction={onAction} onInspectPath={onInspectPath} />
   }
 
   const payload = isPlainObject(card) ? card : { value: card }

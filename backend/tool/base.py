@@ -102,8 +102,10 @@ _tool_visibility_provider: Callable[["ToolEntry"], bool] | None = None
 class ToolEntry:
     def __init__(self, name: str, description: str, parameters: dict, func: Callable,
                  require_confirm: bool = False, scope: str = "skill", policy: ToolPolicy | dict | None = None,
-                 source: str = "local"):
+                 source: str = "local", title: str = "", output_schema: dict | None = None,
+                 metadata: dict | None = None, icons: list[dict[str, Any]] | None = None):
         self.name = name
+        self.title = str(title or "").strip()
         self.description = description
         self.parameters = parameters
         self.func = func
@@ -111,6 +113,9 @@ class ToolEntry:
         self.scope = scope  # "global" = 始终可用, "skill" = 仅当技能加载时可用
         self.policy = ToolPolicy.from_value(policy, require_confirm=require_confirm)
         self.source = str(source or "local").strip() or "local"
+        self.output_schema = dict(output_schema or {})
+        self.metadata = dict(metadata or {})
+        self.icons = [dict(item) for item in (icons or []) if isinstance(item, dict)]
 
     def to_def(self) -> ToolDef:
         description = str(self.description or "").strip()
@@ -179,9 +184,10 @@ def tool(
     scope: str = "skill",
     policy: ToolPolicy | dict | None = None,
     source: str = "local",
+    metadata: dict | None = None,
 ):
     def decorator(func: Callable) -> Callable:
-        entry = ToolEntry(name, description, parameters, func, require_confirm, scope=scope, policy=policy, source=source)
+        entry = ToolEntry(name, description, parameters, func, require_confirm, scope=scope, policy=policy, source=source, metadata=metadata)
         _registry[name] = entry
         return func
     return decorator

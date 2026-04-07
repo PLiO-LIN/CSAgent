@@ -38,6 +38,11 @@ from tool.base import tool, ToolResult
         "confirm_policy": "never",
         "phase_guidance": "当当前工具集不足以完成客服场景时，再加载对应技能",
     },
+    metadata={
+        "internal": True,
+        "admin_hidden": True,
+        "managed_by": "platform_runtime",
+    },
 )
 async def load_skills(skill_name: str = "", mode: str = "switch") -> ToolResult:
     from skill.base import list_skills, get_skill

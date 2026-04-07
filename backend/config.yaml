@@ -10,21 +10,26 @@ llm:
   chat_model: Qwen/Qwen3.5-27B
   # 向量模型名。知识检索建索引和查询时使用。
   embed_model: BAAI/bge-m3
-  active_vendor: default
+  active_vendor: siliconflow
   active_model: Qwen/Qwen3.5-27B
   vendors:
-    - vendor_id: default
-      display_name: 默认厂商
+    - vendor_id: siliconflow
+      display_name: 轨迹流动
       base_url: https://api.siliconflow.cn/v1
       enabled: true
       models:
-      - model_id: Qwen/Qwen3-32B
-        display_name: Qwen/Qwen3-32B
-        chat_model: Qwen/Qwen3-32B
-        enabled: true
       - model_id: Qwen/Qwen3.5-27B
         display_name: Qwen/Qwen3.5-27B
         chat_model: Qwen/Qwen3.5-27B
+        enabled: true
+    - vendor_id: openai_completion
+      display_name: openai_completion
+      base_url: https://api.openai.com/v1
+      enabled: true
+      models:
+      - model_id: gpt-4o-mini
+        display_name: gpt-4o-mini
+        chat_model: gpt-4o-mini
         enabled: true
 
 database:
@@ -68,18 +73,17 @@ summary:
   max_output_tokens: 2000
 
 mcp:
-  enabled: true
+  enabled: false
   tool_timeout_seconds: 60.0
   servers:
-    smoke_fastmcp:
+    telecom-mock:
       enabled: true
-      transport: stdio
-      command: python
-      args:
-      - smoke_fastmcp_server.py
+      transport: sse
+      command: ''
+      args: []
       env: {}
-      cwd: backend
-      url: ''
+      cwd: ''
+      url: http://127.0.0.1:9100/sse
       headers: {}
       timeout_seconds: 30.0
       sse_read_timeout_seconds: 300.0

@@ -91,22 +91,173 @@ export interface CardPreviewResult {
   debug: Record<string, any>
 }
 
+export interface McpProbeToolRecord {
+  public_name: string
+  raw_name: string
+  title: string
+  description: string
+  input_schema: Record<string, any>
+  output_schema: Record<string, any>
+  scope: string
+  icons: Array<Record<string, any>>
+  meta_keys: string[]
+  supports_card: boolean
+  card_type: string
+}
+
+export interface McpProbeResult {
+  ok: boolean
+  server_name: string
+  transport: string
+  server_info: Record<string, any>
+  instructions: string
+  count: number
+  tools: McpProbeToolRecord[]
+}
+
 type AgentRecord = FrameworkInfo['agents'][number]
 type ToolRecord = FrameworkInfo['tools'][number]
 type SkillRecord = FrameworkInfo['skills'][number]
 type CardTemplateRecord = FrameworkInfo['card_templates'][number]
 
-const DEFAULT_MODEL_CONFIG: ModelConfig = {
-  provider: 'openai_compatible',
-  has_api_key: false,
-  base_url: '',
-  chat_model: '',
-  embed_model: '',
-  active_vendor: '',
-  active_model: '',
-  vendors: [],
-  database_url: 'sqlite+aiosqlite:///./csagent.db',
+const PRESET_MODEL_VENDORS: ModelCatalogVendor[] = [
+  {
+    vendor_id: 'siliconflow',
+    display_name: '轨迹流动',
+    base_url: 'https://api.siliconflow.cn/v1',
+    enabled: true,
+    models: [
+      {
+        model_id: 'Qwen/Qwen3.5-27B',
+        display_name: 'Qwen/Qwen3.5-27B',
+        chat_model: 'Qwen/Qwen3.5-27B',
+        enabled: true,
+      },
+    ],
+  },
+  {
+    vendor_id: 'openai_completion',
+    display_name: 'openai_completion',
+    base_url: 'https://api.openai.com/v1',
+    enabled: true,
+    models: [
+      {
+        model_id: 'gpt-4o-mini',
+        display_name: 'gpt-4o-mini',
+        chat_model: 'gpt-4o-mini',
+        enabled: true,
+      },
+    ],
+  },
+]
+
+function cloneVendor(vendor: ModelCatalogVendor): ModelCatalogVendor {
+  return {
+    ...vendor,
+    models: (vendor.models || []).map(model => ({ ...model })),
+  }
 }
+
+function normalizeVendorId(value: unknown) {
+  const text = String(value || '').trim()
+  return text === 'default' ? 'siliconflow' : text
+}
+
+function normalizeVendorDisplayName(vendorId: string, displayName: unknown) {
+  const text = String(displayName || '').trim()
+  if (vendorId === 'siliconflow' && (!text || text === '默认厂商' || text === 'default')) {
+    return '轨迹流动'
+  }
+  return text || vendorId
+}
+
+function mergeVendorModels(baseModels: ModelCatalogModel[], incomingModels: ModelCatalogModel[]) {
+  const merged = new Map(baseModels.map(model => [model.model_id, { ...model }]))
+  incomingModels.forEach(model => {
+    if (!model.model_id) return
+    const existing = merged.get(model.model_id)
+    merged.set(model.model_id, existing ? { ...existing, ...model } : { ...model })
+  })
+  return Array.from(merged.values())
+}
+
+function normalizeModelConfig(raw?: Partial<ModelConfig> | null): ModelConfig {
+  const defaults: ModelConfig = {
+    provider: 'openai_compatible',
+    has_api_key: false,
+    base_url: 'https://api.siliconflow.cn/v1',
+    chat_model: 'Qwen/Qwen3.5-27B',
+    embed_model: 'BAAI/bge-m3',
+    active_vendor: 'siliconflow',
+    active_model: 'Qwen/Qwen3.5-27B',
+    vendors: PRESET_MODEL_VENDORS.map(cloneVendor),
+    database_url: 'sqlite+aiosqlite:///./csagent.db',
+  }
+
+  const vendorMap = new Map(defaults.vendors.map(vendor => [vendor.vendor_id, cloneVendor(vendor)]))
+  for (const item of Array.isArray(raw?.vendors) ? raw?.vendors || [] : []) {
+    const vendorId = normalizeVendorId(item?.vendor_id)
+    if (!vendorId) continue
+    const nextVendor: ModelCatalogVendor = {
+      vendor_id: vendorId,
+      display_name: normalizeVendorDisplayName(vendorId, item?.display_name),
+      base_url: String(item?.base_url || '').trim(),
+      enabled: item?.enabled !== false,
+      models: Array.isArray(item?.models)
+        ? item.models
+          .map(model => {
+            const modelId = String(model?.model_id || '').trim()
+            if (!modelId) return null
+            return {
+              model_id: modelId,
+              display_name: String(model?.display_name || '').trim() || modelId,
+              chat_model: String(model?.chat_model || '').trim() || modelId,
+              enabled: model?.enabled !== false,
+            }
+          })
+          .filter((model): model is ModelCatalogModel => Boolean(model))
+        : [],
+    }
+    const existing = vendorMap.get(vendorId)
+    if (!existing) {
+      vendorMap.set(vendorId, nextVendor)
+      continue
+    }
+    vendorMap.set(vendorId, {
+      ...existing,
+      ...nextVendor,
+      display_name: nextVendor.display_name || existing.display_name,
+      base_url: nextVendor.base_url || existing.base_url,
+      models: mergeVendorModels(existing.models || [], nextVendor.models || []),
+    })
+  }
+
+  const vendors = Array.from(vendorMap.values())
+  const requestedVendorId = normalizeVendorId(raw?.active_vendor)
+  const activeVendor = vendors.some(vendor => vendor.vendor_id === requestedVendorId)
+    ? requestedVendorId
+    : (vendors.find(vendor => vendor.enabled)?.vendor_id || vendors[0]?.vendor_id || defaults.active_vendor)
+  const selectedVendor = vendors.find(vendor => vendor.vendor_id === activeVendor) || vendors[0] || null
+  const requestedModelId = String(raw?.active_model || '').trim()
+  const activeModel = selectedVendor?.models.some(model => model.model_id === requestedModelId)
+    ? requestedModelId
+    : (selectedVendor?.models.find(model => model.enabled)?.model_id || selectedVendor?.models[0]?.model_id || '')
+  const selectedModel = selectedVendor?.models.find(model => model.model_id === activeModel) || selectedVendor?.models[0] || null
+
+  return {
+    provider: String(raw?.provider || defaults.provider),
+    has_api_key: Boolean(raw?.has_api_key),
+    base_url: String(raw?.base_url || selectedVendor?.base_url || defaults.base_url),
+    chat_model: String(raw?.chat_model || selectedModel?.chat_model || defaults.chat_model),
+    embed_model: String(raw?.embed_model || defaults.embed_model),
+    active_vendor: activeVendor,
+    active_model: activeModel,
+    vendors,
+    database_url: String(raw?.database_url || defaults.database_url),
+  }
+}
+
+const DEFAULT_MODEL_CONFIG: ModelConfig = normalizeModelConfig()
 
 const DEFAULT_MCP_CONFIG: McpConfig = {
   enabled: false,
@@ -121,6 +272,8 @@ const EMPTY_INFO: FrameworkInfo = {
   card_templates: [],
 }
 
+const LEGACY_ADMIN_HIDDEN_TOOL_NAMES = new Set(['load_skill', 'load_skills', 'list_skills', 'list_tools'])
+
 function upsertByKey<T extends Record<string, any>>(items: T[], key: string, record: T) {
   const target = String(record?.[key] ?? '').trim()
   if (!target) return items
@@ -129,6 +282,21 @@ function upsertByKey<T extends Record<string, any>>(items: T[], key: string, rec
   const next = [...items]
   next[index] = record
   return next
+}
+
+function removeByKey<T extends Record<string, any>>(items: T[], key: string, target: string) {
+  const normalized = String(target || '').trim()
+  if (!normalized) return items
+  return items.filter(item => String(item?.[key] ?? '').trim() !== normalized)
+}
+
+function isAdminVisibleTool(tool: ToolRecord) {
+  const metadata = tool?.metadata || {}
+  const toolName = String(tool?.tool_name || '').trim()
+  if (metadata?.admin_hidden === true) return false
+  if (metadata?.internal === true) return false
+  if (LEGACY_ADMIN_HIDDEN_TOOL_NAMES.has(toolName)) return false
+  return true
 }
 
 export function usePlatformConsole(info: FrameworkInfo | null) {
@@ -188,6 +356,22 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     return data as AgentRecord
   }, [registryInfo.agents])
 
+  const deleteAgent = useCallback(async (agentId: string) => {
+    const id = String(agentId || '').trim()
+    if (!id) throw new Error('智能体 ID 不能为空')
+    const resp = await fetch(`/api/platform/agents/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    })
+    if (!resp.ok) {
+      const message = await resp.text()
+      throw new Error(message || '删除智能体失败')
+    }
+    setRegistryInfo(prev => ({
+      ...prev,
+      agents: removeByKey(prev.agents, 'agent_id', id),
+    }))
+  }, [])
+
   const publishAgent = useCallback(async (agentId: string) => {
     const id = String(agentId || '').trim()
     if (!id) throw new Error('智能体 ID 不能为空')
@@ -221,6 +405,31 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     return data as ToolRecord
   }, [registryInfo.tools])
 
+  const deleteTool = useCallback(async (toolName: string) => {
+    const name = String(toolName || '').trim()
+    if (!name) throw new Error('工具名称不能为空')
+    const resp = await fetch(`/api/platform/tools/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    })
+    if (!resp.ok) {
+      const message = await resp.text()
+      throw new Error(message || '删除工具失败')
+    }
+    setRegistryInfo(prev => ({
+      ...prev,
+      tools: removeByKey(prev.tools, 'tool_name', name),
+      skills: prev.skills.map(skill => ({
+        ...skill,
+        tool_names: (skill.tool_names || []).filter(item => item !== name),
+        global_tool_names: (skill.global_tool_names || []).filter(item => item !== name),
+      })),
+      agents: prev.agents.map(agent => ({
+        ...agent,
+        global_tool_names: (agent.global_tool_names || []).filter(item => item !== name),
+      })),
+    }))
+  }, [])
+
   const syncLocalTools = useCallback(async () => {
     const resp = await fetch('/api/platform/tools/sync/local', {
       method: 'POST',
@@ -248,6 +457,26 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     return data as SkillRecord
   }, [registryInfo.skills])
 
+  const deleteSkill = useCallback(async (skillName: string) => {
+    const name = String(skillName || '').trim()
+    if (!name) throw new Error('技能名称不能为空')
+    const resp = await fetch(`/api/platform/skills/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    })
+    if (!resp.ok) {
+      const message = await resp.text()
+      throw new Error(message || '删除技能失败')
+    }
+    setRegistryInfo(prev => ({
+      ...prev,
+      skills: removeByKey(prev.skills, 'skill_name', name),
+      agents: prev.agents.map(agent => ({
+        ...agent,
+        skill_names: (agent.skill_names || []).filter(item => item !== name),
+      })),
+    }))
+  }, [])
+
   const saveCardTemplate = useCallback(async (payload: CardTemplateRecord) => {
     const templateId = String(payload?.template_id || '').trim()
     if (!templateId) throw new Error('模板 ID 不能为空')
@@ -265,6 +494,28 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     }))
     return data as CardTemplateRecord
   }, [registryInfo.card_templates])
+
+  const deleteCardTemplate = useCallback(async (templateId: string) => {
+    const id = String(templateId || '').trim()
+    if (!id) throw new Error('模板 ID 不能为空')
+    const resp = await fetch(`/api/platform/card-templates/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    })
+    if (!resp.ok) {
+      const message = await resp.text()
+      throw new Error(message || '删除卡片模板失败')
+    }
+    setRegistryInfo(prev => ({
+      ...prev,
+      card_templates: removeByKey(prev.card_templates || [], 'template_id', id),
+      tools: prev.tools.map(tool => {
+        const binding = { ...(tool.card_binding || {}) }
+        const bindingTemplateId = String(binding.template_id || binding.templateId || '').trim()
+        if (bindingTemplateId !== id) return tool
+        return { ...tool, card_binding: {} }
+      }),
+    }))
+  }, [])
 
   const previewCard = useCallback(async (payload: { template: CardTemplateRecord; source_payload: Record<string, any>; binding?: Record<string, any> }) => {
     const resp = await fetch('/api/platform/cards/preview', {
@@ -287,7 +538,7 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
       const resp = await fetch('/api/framework/model-config')
       if (!resp.ok) throw new Error('读取模型配置失败')
       const data = await resp.json()
-      setModelConfig({ ...DEFAULT_MODEL_CONFIG, ...data })
+      setModelConfig(normalizeModelConfig(data))
     } catch (err: any) {
       setConfigError(err?.message || '读取模型配置失败')
     } finally {
@@ -314,7 +565,7 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
       })
       if (!resp.ok) throw new Error('保存模型配置失败')
       const data = await resp.json()
-      setModelConfig({ ...DEFAULT_MODEL_CONFIG, ...data })
+      setModelConfig(normalizeModelConfig(data))
     } catch (err: any) {
       const message = err?.message || '保存模型配置失败'
       setConfigError(message)
@@ -359,6 +610,29 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     } finally {
       setMcpSaving(false)
     }
+  }, [])
+
+  const testMcpServer = useCallback(async (name: string, server: Partial<McpServerConfig>) => {
+    const targetName = String(name || '').trim() || 'probe'
+    const resp = await fetch('/api/framework/mcp-servers/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: targetName,
+        server,
+      }),
+    })
+    if (!resp.ok) {
+      let message = 'MCP 测试失败'
+      try {
+        const data = await resp.json()
+        message = data?.detail || message
+      } catch {
+        message = await resp.text() || message
+      }
+      throw new Error(message)
+    }
+    return await resp.json() as McpProbeResult
   }, [])
 
   const syncMcpTools = useCallback(async () => {
@@ -425,8 +699,13 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     void loadSessionMessages(selectedSessionId)
   }, [selectedSessionId, loadSessionMessages])
 
+  const adminVisibleTools = useMemo(
+    () => (registryInfo.tools || []).filter(isAdminVisibleTool),
+    [registryInfo.tools],
+  )
+
   const cardCatalog = useMemo<CardCatalogItem[]>(() => {
-    const tools = (registryInfo.tools || [])
+    const tools = adminVisibleTools
       .filter(item => item.supports_card || item.card_type)
       .map(item => ({
         id: `tool:${item.tool_name}:${item.card_type || 'bound'}`,
@@ -449,16 +728,16 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     )
 
     return [...tools, ...skills]
-  }, [registryInfo])
+  }, [adminVisibleTools, registryInfo.skills])
 
   const stats = useMemo(() => ({
     modelsReady: modelConfig.vendors.reduce((count, vendor) => count + vendor.models.filter(item => item.enabled).length, 0) || (modelConfig.chat_model ? 1 : 0),
     agents: registryInfo.agents?.length || 0,
-    tools: registryInfo.tools?.length || 0,
+    tools: adminVisibleTools.length,
     skills: registryInfo.skills?.length || 0,
     cards: cardCatalog.length + (registryInfo.card_templates?.length || 0),
     sessions: sessions.length,
-  }), [modelConfig.chat_model, modelConfig.vendors, registryInfo, cardCatalog.length, sessions.length])
+  }), [adminVisibleTools.length, modelConfig.chat_model, modelConfig.vendors, registryInfo.agents?.length, registryInfo.card_templates?.length, registryInfo.skills?.length, cardCatalog.length, sessions.length])
 
   return {
     registryInfo,
@@ -466,14 +745,18 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     registryError,
     refreshRegistry,
     agents: registryInfo.agents,
-    tools: registryInfo.tools,
+    tools: adminVisibleTools,
     skills: registryInfo.skills,
     cardTemplates: registryInfo.card_templates || [],
     saveAgent,
+    deleteAgent,
     publishAgent,
     saveTool,
+    deleteTool,
     saveSkill,
+    deleteSkill,
     saveCardTemplate,
+    deleteCardTemplate,
     previewCard,
     syncLocalTools,
     syncMcpTools,
@@ -489,6 +772,7 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     mcpError,
     refreshMcpConfig,
     saveMcpConfig,
+    testMcpServer,
     sessions,
     sessionsLoading,
     sessionsError,

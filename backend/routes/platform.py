@@ -13,6 +13,10 @@ from platform_registry import (
     PlatformCardTemplateRecord,
     PlatformSkillRecord,
     PlatformToolRecord,
+    delete_agent_record,
+    delete_card_template_record,
+    delete_skill_record,
+    delete_tool_record,
     get_agent_record,
     get_card_template_record,
     get_registry_snapshot,
@@ -73,6 +77,14 @@ async def update_tool(tool_name: str, payload: PlatformToolRecord, db: AsyncSess
     return record.model_dump(by_alias=True)
 
 
+@router.delete("/tools/{tool_name}")
+async def delete_tool(tool_name: str, db: AsyncSession = Depends(get_db)):
+    deleted = await delete_tool_record(db, tool_name)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Tool not found")
+    return {"ok": True, "tool_name": tool_name}
+
+
 @router.get("/card-templates")
 async def platform_card_templates(include_disabled: bool = False):
     return [record.model_dump(by_alias=True) for record in list_card_template_records(include_disabled=include_disabled)]
@@ -99,6 +111,14 @@ async def update_card_template(template_id: str, payload: PlatformCardTemplateRe
     return record.model_dump(by_alias=True)
 
 
+@router.delete("/card-templates/{template_id}")
+async def delete_card_template(template_id: str, db: AsyncSession = Depends(get_db)):
+    deleted = await delete_card_template_record(db, template_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Card template not found")
+    return {"ok": True, "template_id": template_id}
+
+
 @router.post("/cards/preview")
 async def preview_card(payload: CardPreviewReq):
     return build_template_card(payload.template, payload.source_payload, payload.binding)
@@ -120,6 +140,14 @@ async def update_skill(skill_name: str, payload: PlatformSkillRecord, db: AsyncS
     data = payload.model_copy(update={"skill_name": skill_name})
     record = await upsert_skill_record(db, data)
     return record.model_dump(by_alias=True)
+
+
+@router.delete("/skills/{skill_name}")
+async def delete_skill(skill_name: str, db: AsyncSession = Depends(get_db)):
+    deleted = await delete_skill_record(db, skill_name)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return {"ok": True, "skill_name": skill_name}
 
 
 @router.get("/agents")
@@ -146,6 +174,17 @@ async def update_agent(agent_id: str, payload: PlatformAgentRecord, db: AsyncSes
     data = payload.model_copy(update={"agent_id": agent_id})
     record = await upsert_agent_record(db, data)
     return record.model_dump(by_alias=True)
+
+
+@router.delete("/agents/{agent_id}")
+async def delete_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
+    try:
+        deleted = await delete_agent_record(db, agent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return {"ok": True, "agent_id": agent_id}
 
 
 @router.post("/agents/{agent_id}/publish")

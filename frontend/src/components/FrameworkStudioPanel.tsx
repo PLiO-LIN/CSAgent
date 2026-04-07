@@ -35,6 +35,17 @@ function createMemoryItem(): MemoryItem {
   }
 }
 
+const LEGACY_ADMIN_HIDDEN_TOOL_NAMES = new Set(['load_skill', 'load_skills', 'list_skills', 'list_tools'])
+
+function isAdminVisibleTool(tool: NonNullable<FrameworkInfo['tools']>[number]) {
+  const metadata = tool?.metadata || {}
+  const toolName = String(tool?.tool_name || '').trim()
+  if (metadata?.admin_hidden === true) return false
+  if (metadata?.internal === true) return false
+  if (LEGACY_ADMIN_HIDDEN_TOOL_NAMES.has(toolName)) return false
+  return true
+}
+
 export default function FrameworkStudioPanel({
   profile,
   info,
@@ -54,7 +65,7 @@ export default function FrameworkStudioPanel({
 
   const registrySummary = useMemo(() => {
     return {
-      tools: info?.tools || [],
+      tools: (info?.tools || []).filter(isAdminVisibleTool),
       skills: info?.skills || [],
       agents: info?.agents || [],
     }

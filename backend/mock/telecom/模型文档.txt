@@ -1,0 +1,4 @@
+密钥  sk-yqyljieoztryqogjmgwibejskqgibuuhjgpeodzqtifhhacp
+大模型 ： Pro/moonshotai/Kimi-K2.5
+模型接口文档：https://docs.siliconflow.cn/cn/api-reference/chat-completions/chat-completions
+嵌入模型：BAAI/bge-m3

@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import get_mcp_config_payload, get_model_config_payload, patch_settings, settings
+from config import McpServerSettings, get_mcp_config_payload, get_model_config_payload, patch_settings, settings
 from db.engine import get_db
 from framework_profile import load_framework_profile, patch_framework_profile
+from mcp_runtime import inspect_mcp_server
 from platform_registry import get_registry_snapshot
 
 router = APIRouter(prefix="/api/framework", tags=["framework"])
@@ -34,6 +35,11 @@ class McpConfigPatchReq(BaseModel):
     enabled: bool | None = None
     tool_timeout_seconds: float | None = None
     servers: dict[str, Any] | None = None
+
+
+class McpServerProbeReq(BaseModel):
+    name: str | None = None
+    server: dict[str, Any] | None = None
 
 
 @router.get("/info")
@@ -99,6 +105,16 @@ async def update_mcp_config(req: McpConfigPatchReq):
         normalized["mcp_servers"] = payload["servers"]
     updated = patch_settings(normalized)
     return get_mcp_config_payload(updated)
+
+
+@router.post("/mcp-servers/test")
+async def test_mcp_server(req: McpServerProbeReq):
+    target_name = str(req.name or "probe").strip() or "probe"
+    try:
+        config = McpServerSettings.model_validate(req.server or {})
+        return await inspect_mcp_server(target_name, config)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.put("/profile")

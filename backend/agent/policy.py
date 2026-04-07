@@ -22,12 +22,18 @@ class ToolPolicyDecision:
     history_entry: dict[str, Any] = field(default_factory=dict)
 
 
-def enrich_tool_args(entry: ToolEntry, args: dict | None, agent_state: dict, phone: str = "") -> dict:
+def enrich_tool_args(entry: ToolEntry, args: dict | None, agent_state: dict, phone: str = "", bound_args: dict[str, Any] | None = None) -> dict:
     result = dict(args or {})
     accepted = entry.accepted_arg_names()
 
     if phone and (accepted is None or "phone" in accepted) and not result.get("phone"):
         result["phone"] = phone
+
+    for key, value in (bound_args or {}).items():
+        if value in (None, "", [], {}):
+            continue
+        if accepted is None or key in accepted:
+            result[key] = value
 
     return entry.sanitize_args(result)
 

@@ -252,8 +252,4 @@ npm run dev
 
 ## 文档索引
 
-- `docs/01-整体架构说明.md`
-- `docs/02-迁移策略.md`
-- `docs/03-开发计划.md`
-- `docs/04-插件化开发标准.md`
-- `docs/05-当前能力映射.md`
+- `docs/01-Tool-Skill-Card-开发与接入指南.md`

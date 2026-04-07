@@ -5,6 +5,7 @@ import time
 from typing import Any, AsyncIterator
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from card.runtime import build_template_card
 from agent.state import (
     clear_compaction_failure,
     clear_pending_confirmation,
@@ -23,8 +24,9 @@ from agent.context import apply_budget_governance, rebuild, needs_compaction, fi
 from agent.compaction import compact
 from agent.reminder import check_reminders
 from agent.policy import enrich_tool_args, evaluate_tool_policy
+from mcp_card_contract import extract_result_card_contract
 from mcp_runtime import ensure_mcp_tools_loaded
-from platform_registry import resolve_agent_runtime
+from platform_registry import get_card_template_record, get_tool_record, resolve_agent_runtime
 from provider.base import Provider, ToolDef
 from runtime_scope import reset_runtime_scope, set_runtime_scope
 from tool.registry import all_tools, get_tool, parse_args
@@ -60,7 +62,157 @@ def _card_id(name: str, args: dict, suffix: str = "") -> str:
     return f"{prefix}{suffix_part}_{digest}"
 
 
-def _collect_tools(loaded_skills: list[Skill], global_tool_names: list[str] | None = None) -> list[ToolDef]:
+def _normalize_card_payload_list(value: Any, default_prefix: str = "card") -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    if not isinstance(value, list):
+        return result
+    for idx, item in enumerate(value):
+        if isinstance(item, dict) and isinstance(item.get("card"), dict):
+            result.append({
+                "card": dict(item.get("card") or {}),
+                "suffix": str(item.get("suffix") or f"{default_prefix}_{idx + 1}").strip() or f"{default_prefix}_{idx + 1}",
+            })
+            continue
+        if isinstance(item, dict):
+            result.append({
+                "card": dict(item),
+                "suffix": f"{default_prefix}_{idx + 1}",
+            })
+    return result
+
+
+def _resolve_bound_cards(tool_name: str, metadata: dict[str, Any] | None) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    meta = dict(metadata or {})
+    mcp_meta = dict(meta.get("mcp_meta") or {}) if isinstance(meta.get("mcp_meta"), dict) else {}
+    protocol_result = extract_result_card_contract(mcp_meta)
+    direct_card = protocol_result.get("card") if isinstance(protocol_result.get("card"), dict) else meta.get("card")
+    direct_cards = protocol_result.get("cards") if isinstance(protocol_result.get("cards"), list) else meta.get("cards")
+    if isinstance(direct_card, dict) or isinstance(direct_cards, list):
+        return (dict(direct_card) if isinstance(direct_card, dict) else None, _normalize_card_payload_list(direct_cards, default_prefix=tool_name or "card"))
+
+    tool_record = get_tool_record(tool_name)
+    binding = dict(tool_record.card_binding or {}) if tool_record else {}
+    protocol_binding = protocol_result.get("binding")
+    if isinstance(protocol_binding, dict):
+        binding.update(dict(protocol_binding))
+    if (not tool_record or not tool_record.supports_card) and not binding:
+        return None, []
+    if not binding:
+        return None, []
+
+    mode = str(binding.get("mode") or "").strip().lower()
+    template_id = str(binding.get("template_id") or "").strip()
+    structured_content = meta.get("mcp_structured_content")
+    source_payload = protocol_result.get("card_source") if isinstance(protocol_result.get("card_source"), dict) else meta.get("card_source")
+    if not isinstance(source_payload, dict) and isinstance(structured_content, dict):
+        source_payload = structured_content
+    source_payloads = protocol_result.get("card_sources") if isinstance(protocol_result.get("card_sources"), list) else meta.get("card_sources")
+    if not isinstance(source_payloads, list) and isinstance(structured_content, list):
+        source_payloads = structured_content
+
+    if template_id:
+        template = get_card_template_record(template_id)
+        if not template:
+            logger.warning("Card binding skipped: template not found tool=%s template_id=%s", tool_name, template_id)
+            return None, []
+
+        if isinstance(source_payload, dict):
+            built = build_template_card(template, source_payload, binding).get("card")
+            return (dict(built) if isinstance(built, dict) else None, [])
+
+        built_cards: list[dict[str, Any]] = []
+        if isinstance(source_payloads, list):
+            for idx, item in enumerate(source_payloads):
+                payload = dict(item.get("source_payload") or {}) if isinstance(item, dict) and isinstance(item.get("source_payload"), dict) else (dict(item) if isinstance(item, dict) else None)
+                if not isinstance(payload, dict):
+                    continue
+                built = build_template_card(template, payload, binding).get("card")
+                if not isinstance(built, dict):
+                    continue
+                suffix = str(item.get("suffix") or f"{template_id}_{idx + 1}").strip() if isinstance(item, dict) else f"{template_id}_{idx + 1}"
+                built_cards.append({"card": dict(built), "suffix": suffix or f"{template_id}_{idx + 1}"})
+        return None, built_cards
+
+    if mode == "tool_metadata":
+        if isinstance(source_payload, dict):
+            return dict(source_payload), []
+        return None, _normalize_card_payload_list(source_payloads, default_prefix=tool_name or "card")
+
+    return None, []
+
+
+def _normalize_agent_runtime_fields(values: list[Any] | None) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for item in values or []:
+        if hasattr(item, "model_dump"):
+            result.append(dict(item.model_dump()))
+        elif isinstance(item, dict):
+            result.append(dict(item))
+    return result
+
+
+def _resolve_agent_variable_values(agent_variables: list[dict[str, Any]], session_metadata: dict[str, Any] | None) -> dict[str, Any]:
+    raw_values = dict((session_metadata or {}).get("agent_variables") or {}) if isinstance((session_metadata or {}).get("agent_variables"), dict) else {}
+    result: dict[str, Any] = {}
+    for item in agent_variables:
+        key = str(item.get("key") or "").strip()
+        if not key:
+            continue
+        value = raw_values.get(key)
+        if value in (None, "", [], {}):
+            value = item.get("default_value")
+        if value in (None, "", [], {}):
+            continue
+        result[key] = value
+    return result
+
+
+def _tool_binding_rows(tool_name: str, tool_arg_bindings: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    target = str(tool_name or "").strip()
+    return [
+        item for item in (tool_arg_bindings or [])
+        if str(item.get("tool_name") or "").strip() == target
+    ]
+
+
+def _bound_arg_names(tool_name: str, tool_arg_bindings: list[dict[str, Any]] | None) -> set[str]:
+    result: set[str] = set()
+    for item in _tool_binding_rows(tool_name, tool_arg_bindings):
+        arg_name = str(item.get("arg_name") or "").strip()
+        if arg_name:
+            result.add(arg_name)
+    return result
+
+
+def _apply_bound_args_to_tool_def(tool_def: ToolDef, tool_arg_bindings: list[dict[str, Any]] | None) -> ToolDef:
+    bound_names = _bound_arg_names(tool_def.name, tool_arg_bindings)
+    if not bound_names:
+        return tool_def
+    parameters = dict(tool_def.parameters or {})
+    properties = parameters.get("properties")
+    if isinstance(properties, dict):
+        parameters["properties"] = {key: value for key, value in properties.items() if key not in bound_names}
+    required = parameters.get("required")
+    if isinstance(required, list):
+        parameters["required"] = [item for item in required if str(item or "").strip() not in bound_names]
+    bound_text = "、".join(sorted(bound_names))
+    note = f"参数 {bound_text} 由当前会话绑定变量自动注入，调用时无需填写，也禁止自行编造。"
+    description = str(tool_def.description or "").strip()
+    if note not in description:
+        description = f"{description} {note}".strip()
+    return ToolDef(
+        name=tool_def.name,
+        description=description,
+        parameters=parameters,
+        require_confirm=tool_def.require_confirm,
+    )
+
+
+def _collect_tools(
+    loaded_skills: list[Skill],
+    global_tool_names: list[str] | None = None,
+    tool_arg_bindings: list[dict[str, Any]] | None = None,
+) -> list[ToolDef]:
     """组装当前可用工具 = Agent 全局工具 + 已加载技能工具（去重）"""
     runtime_tools = all_tools()
     tools: list[ToolDef] = []
@@ -71,13 +223,13 @@ def _collect_tools(loaded_skills: list[Skill], global_tool_names: list[str] | No
             entry = runtime_tools.get(str(name or "").strip())
             if not entry or entry.name in seen:
                 continue
-            tools.append(entry.to_def())
+            tools.append(_apply_bound_args_to_tool_def(entry.to_def(), tool_arg_bindings))
             seen.add(entry.name)
     else:
         for entry in runtime_tools.values():
             if entry.scope != "global" or entry.name in seen:
                 continue
-            tools.append(entry.to_def())
+            tools.append(_apply_bound_args_to_tool_def(entry.to_def(), tool_arg_bindings))
             seen.add(entry.name)
 
     for skill in loaded_skills:
@@ -85,13 +237,50 @@ def _collect_tools(loaded_skills: list[Skill], global_tool_names: list[str] | No
             entry = runtime_tools.get(str(tool_name or "").strip())
             if not entry or entry.name in seen:
                 continue
-            tools.append(entry.to_def())
+            tools.append(_apply_bound_args_to_tool_def(entry.to_def(), tool_arg_bindings))
             seen.add(entry.name)
         for td in skill.available_tools():
             if td.name not in seen:
-                tools.append(td)
+                tools.append(_apply_bound_args_to_tool_def(td, tool_arg_bindings))
                 seen.add(td.name)
     return tools
+
+
+def _resolve_bound_tool_args(
+    tool_name: str,
+    tool_arg_bindings: list[dict[str, Any]] | None,
+    agent_variable_values: dict[str, Any],
+) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    bound_args: dict[str, Any] = {}
+    missing: list[dict[str, str]] = []
+    for item in _tool_binding_rows(tool_name, tool_arg_bindings):
+        arg_name = str(item.get("arg_name") or "").strip()
+        variable_key = str(item.get("variable_key") or "").strip()
+        if not arg_name or not variable_key:
+            continue
+        value = agent_variable_values.get(variable_key)
+        if value in (None, "", [], {}):
+            missing.append({"arg_name": arg_name, "variable_key": variable_key})
+            continue
+        bound_args[arg_name] = value
+    return bound_args, missing
+
+
+def _missing_bound_variable_text(tool_name: str, missing: list[dict[str, str]], agent_variables: list[dict[str, Any]]) -> str:
+    label_map = {
+        str(item.get("key") or "").strip(): str(item.get("label") or item.get("key") or "").strip()
+        for item in agent_variables
+        if str(item.get("key") or "").strip()
+    }
+    parts: list[str] = []
+    for item in missing:
+        variable_key = str(item.get("variable_key") or "").strip()
+        arg_name = str(item.get("arg_name") or "").strip()
+        label = label_map.get(variable_key) or variable_key
+        if variable_key and arg_name:
+            parts.append(f"{label}({variable_key}) -> {arg_name}")
+    details = "、".join(parts) if parts else "固定入参"
+    return f"[Agent Variables] 工具 {tool_name} 缺少已绑定变量：{details}。请先在当前智能体对话页填写这些固定入参，模型不会自行补齐。"
 
 
 def _load_skills_from_state(agent_state: dict, initial_skill: str = "") -> list[Skill]:
@@ -305,6 +494,9 @@ async def run(
     agent_state = load_agent_state(session_metadata)
     selected_agent_id = str(agent_id or session_metadata.get("agent_id") or "").strip()
     agent_runtime = resolve_agent_runtime(selected_agent_id)
+    runtime_agent_variables = _normalize_agent_runtime_fields(agent_runtime.agent_variables)
+    runtime_tool_arg_bindings = _normalize_agent_runtime_fields(agent_runtime.tool_arg_bindings)
+    agent_variable_values = _resolve_agent_variable_values(runtime_agent_variables, session_metadata)
     selected_agent_id = agent_runtime.agent_id
     if provider is None or agent_runtime.model_settings:
         from provider import factory
@@ -588,8 +780,10 @@ async def run(
                 persona_prompt=agent_runtime.persona_prompt,
                 skill_guide_prompt=agent_runtime.skill_guide_prompt,
                 memory_prompt=agent_runtime.memory_prompt,
+                agent_variables=runtime_agent_variables,
+                agent_variable_values=agent_variable_values,
             )
-            tools = _collect_tools(loaded_skills, global_tool_names=agent_runtime.global_tool_names)
+            tools = _collect_tools(loaded_skills, global_tool_names=agent_runtime.global_tool_names, tool_arg_bindings=runtime_tool_arg_bindings)
             visible_tool_names = {tool.name for tool in tools}
 
             sys_text = "\n\n".join([s for s in system if s]).strip()
@@ -828,7 +1022,8 @@ async def run(
             name = tc["name"]
             tc_id = tc.get("id", "")
             entry = get_tool(name) if name in visible_tool_names else None
-            args = enrich_tool_args(entry, parse_args(tc.get("arguments", "")), agent_state, phone=phone) if entry else _normalize_tool_args(parse_args(tc.get("arguments", "")), phone)
+            bound_args, missing_bound_variables = _resolve_bound_tool_args(name, runtime_tool_arg_bindings, agent_variable_values)
+            args = enrich_tool_args(entry, parse_args(tc.get("arguments", "")), agent_state, phone=phone, bound_args=bound_args) if entry else _normalize_tool_args(parse_args(tc.get("arguments", "")), phone)
             result_text = f"未知工具: {name}"
             tool_result_status = "unknown"
             tool_latency_ms = 0
@@ -855,6 +1050,29 @@ async def run(
                     payload={
                         "tool_call": tc,
                         "args": args,
+                    },
+                )
+                yield Event("tool_result", tool=name, tool_call_id=tc_id, text=result_text, error=True)
+            elif missing_bound_variables:
+                tool_result_status = "missing_bound_variable"
+                result_text = _missing_bound_variable_text(name, missing_bound_variables, runtime_agent_variables)
+                await _log_agent_event(
+                    db,
+                    session_id=session_id,
+                    step=step,
+                    agent_state=agent_state,
+                    category="tool_policy",
+                    event_type="missing_bound_variable",
+                    provider_name=provider_name,
+                    phone=phone,
+                    summary=f"工具 {name} 缺少绑定变量",
+                    status="blocked",
+                    llm_request_id=llm_req.id,
+                    tool_name=name,
+                    tool_call_id=tc_id,
+                    payload={
+                        "args": args,
+                        "missing_bound_variables": missing_bound_variables,
                     },
                 )
                 yield Event("tool_result", tool=name, tool_call_id=tc_id, text=result_text, error=True)
@@ -1121,8 +1339,7 @@ async def run(
 
                         last_tool_policy_warning = ""
                         result_text = result.text
-                        card = result.metadata.get("card")
-                        cards = result.metadata.get("cards")
+                        card, cards = _resolve_bound_cards(name, result.metadata)
                         if card:
                             cid = _card_id(name, exec_args)
                             emitted_card_ids.append(cid)
@@ -1138,7 +1355,8 @@ async def run(
                                     suffix = ""
                                 if not isinstance(payload, dict):
                                     continue
-                                cid = _card_id(name, exec_args, suffix or payload.get("type", f"card_{idx + 1}"))
+                                default_suffix = f"{payload.get('type', 'card')}_{idx + 1}"
+                                cid = _card_id(name, exec_args, suffix or default_suffix)
                                 emitted_card_ids.append(cid)
                                 result_text += f"\n\n_card_id: {cid}"
                                 yield Event("card", card_id=cid, card=payload, tool_call_id=tc_id)

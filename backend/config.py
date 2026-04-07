@@ -145,15 +145,127 @@ class LlmVendorSettings(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+def _normalize_llm_vendor_id(value: Any) -> str:
+    text = str(value or "").strip()
+    return "siliconflow" if text == "default" else text
+
+
+def _default_llm_vendors() -> list[LlmVendorSettings]:
+    return [
+        LlmVendorSettings(
+            vendor_id="siliconflow",
+            display_name="轨迹流动",
+            base_url="https://api.siliconflow.cn/v1",
+            enabled=True,
+            models=[
+                LlmModelSettings(
+                    model_id="Qwen/Qwen3.5-27B",
+                    display_name="Qwen/Qwen3.5-27B",
+                    chat_model="Qwen/Qwen3.5-27B",
+                    enabled=True,
+                )
+            ],
+        ),
+        LlmVendorSettings(
+            vendor_id="openai_completion",
+            display_name="openai_completion",
+            base_url="https://api.openai.com/v1",
+            enabled=True,
+            models=[
+                LlmModelSettings(
+                    model_id="gpt-4o-mini",
+                    display_name="gpt-4o-mini",
+                    chat_model="gpt-4o-mini",
+                    enabled=True,
+                )
+            ],
+        ),
+    ]
+
+
+def _merge_llm_models(base_models: list[LlmModelSettings], incoming_models: list[LlmModelSettings]) -> list[LlmModelSettings]:
+    merged: dict[str, LlmModelSettings] = {
+        item.model_id: item.model_copy(deep=True)
+        for item in (base_models or [])
+        if item.model_id
+    }
+    for item in incoming_models or []:
+        if not item.model_id:
+            continue
+        existing = merged.get(item.model_id)
+        if existing is None:
+            merged[item.model_id] = item.model_copy(deep=True)
+            continue
+        if item.display_name:
+            existing.display_name = item.display_name
+        if item.chat_model:
+            existing.chat_model = item.chat_model
+        existing.enabled = item.enabled
+    return list(merged.values())
+
+
+def _coerce_llm_vendor_settings(raw_vendors: Any) -> list[LlmVendorSettings]:
+    vendors: list[LlmVendorSettings] = []
+    for item in (raw_vendors or []):
+        if isinstance(item, LlmVendorSettings):
+            vendors.append(item.model_copy(deep=True))
+            continue
+        vendors.append(LlmVendorSettings.model_validate(item))
+    return vendors
+
+
+def _coerce_mcp_server_map(raw_servers: Any) -> dict[str, McpServerSettings]:
+    servers: dict[str, McpServerSettings] = {}
+    if not isinstance(raw_servers, dict):
+        return servers
+    for name, config in raw_servers.items():
+        key = str(name or "").strip()
+        if not key:
+            continue
+        if isinstance(config, McpServerSettings):
+            servers[key] = config.model_copy(deep=True)
+            continue
+        servers[key] = McpServerSettings.model_validate(config)
+    return servers
+
+
+def _ensure_default_llm_vendors(raw_vendors: Any) -> list[LlmVendorSettings]:
+    merged: dict[str, LlmVendorSettings] = {
+        item.vendor_id: item.model_copy(deep=True)
+        for item in _default_llm_vendors()
+        if item.vendor_id
+    }
+    for item in _coerce_llm_vendor_settings(raw_vendors):
+        vendor = item.model_copy(deep=True)
+        vendor.vendor_id = _normalize_llm_vendor_id(vendor.vendor_id)
+        if not vendor.vendor_id:
+            continue
+        if vendor.vendor_id == "siliconflow" and (not vendor.display_name or vendor.display_name in {"默认厂商", "default"}):
+            vendor.display_name = "轨迹流动"
+        elif not vendor.display_name:
+            vendor.display_name = vendor.vendor_id
+        existing = merged.get(vendor.vendor_id)
+        if existing is None:
+            merged[vendor.vendor_id] = vendor
+            continue
+        if vendor.display_name:
+            existing.display_name = vendor.display_name
+        if vendor.base_url:
+            existing.base_url = vendor.base_url
+        existing.enabled = vendor.enabled
+        existing.models = _merge_llm_models(existing.models or [], vendor.models or [])
+    return list(merged.values())
+
+
 class Settings(BaseModel):
     # SiliconFlow
     api_key: str = ""
     base_url: str = "https://api.siliconflow.cn/v1"
-    chat_model: str = "Qwen/Qwen3-32B"
+    chat_model: str = "Qwen/Qwen3.5-27B"
     embed_model: str = "BAAI/bge-m3"
-    llm_active_vendor: str = ""
-    llm_active_model: str = ""
-    llm_vendors: list[LlmVendorSettings] = Field(default_factory=list)
+    llm_active_vendor: str = "siliconflow"
+    llm_active_model: str = "Qwen/Qwen3.5-27B"
+    llm_vendors: list[LlmVendorSettings] = Field(default_factory=_default_llm_vendors)
 
     # 数据库
     database_url: str = "sqlite+aiosqlite:///./csagent.db"
@@ -188,6 +300,16 @@ class Settings(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8200
 
+    @field_validator("llm_active_vendor", mode="before")
+    @classmethod
+    def normalize_llm_active_vendor(cls, value: Any) -> str:
+        return _normalize_llm_vendor_id(value)
+
+    @field_validator("llm_vendors", mode="before")
+    @classmethod
+    def normalize_llm_vendors(cls, value: Any) -> list[LlmVendorSettings]:
+        return _ensure_default_llm_vendors(value)
+
     @field_validator("database_url", mode="before")
     @classmethod
     def normalize_database_url(cls, value: str) -> str:
@@ -219,11 +341,11 @@ def _nest_yaml_sections(data: dict) -> dict:
         "llm": {
             "api_key": data.get("api_key", ""),
             "base_url": data.get("base_url", "https://api.siliconflow.cn/v1"),
-            "chat_model": data.get("chat_model", "Qwen/Qwen3-32B"),
+            "chat_model": data.get("chat_model", "Qwen/Qwen3.5-27B"),
             "embed_model": data.get("embed_model", "BAAI/bge-m3"),
-            "active_vendor": data.get("llm_active_vendor", ""),
-            "active_model": data.get("llm_active_model", ""),
-            "vendors": data.get("llm_vendors", []),
+            "active_vendor": data.get("llm_active_vendor", "siliconflow"),
+            "active_model": data.get("llm_active_model", "Qwen/Qwen3.5-27B"),
+            "vendors": data.get("llm_vendors", [vendor.model_dump() for vendor in _default_llm_vendors()]),
         },
         "database": {
             "url": _display_database_url(data.get("database_url", "sqlite+aiosqlite:///./csagent.db")),
@@ -479,35 +601,10 @@ def patch_settings(patch: dict[str, Any] | None = None, preserve_blank_fields: s
     return sync_runtime_settings(updated)
 
 
-def _coerce_llm_vendor_settings(raw_vendors: Any) -> list[LlmVendorSettings]:
-    vendors: list[LlmVendorSettings] = []
-    for item in (raw_vendors or []):
-        if isinstance(item, LlmVendorSettings):
-            vendors.append(item.model_copy(deep=True))
-            continue
-        vendors.append(LlmVendorSettings.model_validate(item))
-    return vendors
-
-
-def _coerce_mcp_server_map(raw_servers: Any) -> dict[str, McpServerSettings]:
-    servers: dict[str, McpServerSettings] = {}
-    if not isinstance(raw_servers, dict):
-        return servers
-    for name, config in raw_servers.items():
-        key = str(name or "").strip()
-        if not key:
-            continue
-        if isinstance(config, McpServerSettings):
-            servers[key] = config.model_copy(deep=True)
-            continue
-        servers[key] = McpServerSettings.model_validate(config)
-    return servers
-
-
 def get_llm_catalog(source: Settings | None = None) -> tuple[list[LlmVendorSettings], str, str]:
     current = source or settings
-    vendors = _coerce_llm_vendor_settings(current.llm_vendors or [])
-    active_vendor = str(current.llm_active_vendor or "").strip()
+    vendors = _ensure_default_llm_vendors(current.llm_vendors or [])
+    active_vendor = _normalize_llm_vendor_id(current.llm_active_vendor)
     active_model = str(current.llm_active_model or "").strip()
 
     if vendors and not active_vendor:

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 from framework_profile import load_framework_profile, render_long_term_memory
 
 
@@ -12,6 +13,8 @@ def build_system(
     persona_prompt: str = "",
     skill_guide_prompt: str = "",
     memory_prompt: str = "",
+    agent_variables: list[dict[str, Any]] | None = None,
+    agent_variable_values: dict[str, Any] | None = None,
 ) -> list[str]:
     profile = load_framework_profile()
     resolved_system_core = str(system_core_prompt or profile.prompts.system_core).strip()
@@ -27,6 +30,10 @@ def build_system(
     user_context = _build_user_context(phone)
     if user_context:
         parts.append(_section("Layer 3: User Context", user_context))
+
+    variable_context = _build_agent_variable_context(agent_variables or [], agent_variable_values or {})
+    if variable_context:
+        parts.append(_section("Layer 3.5: Agent Bound Variables", variable_context))
 
     memory_text = render_long_term_memory(query=latest_user_text, prompt_override=memory_prompt)
     if memory_text:
@@ -49,6 +56,27 @@ def _build_user_context(phone: str) -> str:
         f"- 当前会话绑定的用户标识: {phone}\n\n"
         f"如果后续工具需要用户标识，可优先直接使用该标识 {phone}，无需重复询问。"
     )
+
+
+def _build_agent_variable_context(agent_variables: list[dict[str, Any]], agent_variable_values: dict[str, Any]) -> str:
+    lines: list[str] = []
+    for item in agent_variables:
+        if not isinstance(item, dict):
+            continue
+        if not bool(item.get("inject_to_prompt")):
+            continue
+        key = str(item.get("key") or "").strip()
+        if not key:
+            continue
+        value = agent_variable_values.get(key)
+        if value in (None, "", [], {}):
+            continue
+        label = str(item.get("label") or key).strip() or key
+        lines.append(f"- {label} ({key}): {value}")
+    if not lines:
+        return ""
+    lines.append("- 上述变量由平台或上层业务显式注入；若工具参数已绑定这些变量，参数由系统自动填写，禁止自行编造或改写。")
+    return "\n".join(lines)
 
 
 def _build_runtime_controls(runtime_controls: dict, agent_state: dict) -> str:
