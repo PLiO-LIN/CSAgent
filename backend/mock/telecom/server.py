@@ -17,6 +17,7 @@
   python -m backend.mock.telecom.server --stdio   # stdio 模式
 """
 import argparse
+import asyncio
 import base64
 import inspect
 import os
@@ -29,7 +30,10 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from mcp import types
-from mcp.server.fastmcp import FastMCP
+from mcp.server import Server
+from mcp.server.sse import SseServerTransport
+from mcp.server.stdio import stdio_server
+from starlette.responses import PlainTextResponse
 
 from backend.mcp_card_contract import CSAGENT_CARD_META_KEY, CSAGENT_ICONS_META_KEY
 from backend.mock.telecom.mock_data import (
@@ -44,11 +48,111 @@ from backend.mock.telecom.mock_data import (
     search_knowledge as _search_knowledge,
 )
 
-mcp = FastMCP(
+def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
+    if annotation in {inspect.Signature.empty, Any}:
+        return {}
+    if annotation is str:
+        return {"type": "string"}
+    if annotation is int:
+        return {"type": "integer"}
+    if annotation is float:
+        return {"type": "number"}
+    if annotation is bool:
+        return {"type": "boolean"}
+    return {}
+
+
+def _build_input_schema(func: Any) -> dict[str, Any]:
+    properties: dict[str, dict[str, Any]] = {}
+    required: list[str] = []
+    for name, param in inspect.signature(func).parameters.items():
+        if param.kind not in {inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY}:
+            continue
+        schema = dict(_annotation_to_schema(param.annotation))
+        if param.default is inspect.Signature.empty:
+            required.append(name)
+        elif isinstance(param.default, (str, int, float, bool)) or param.default is None:
+            schema["default"] = param.default
+        properties[name] = schema
+    payload: dict[str, Any] = {
+        "type": "object",
+        "properties": properties,
+        "additionalProperties": False,
+    }
+    if required:
+        payload["required"] = required
+    return payload
+
+
+class _CompatMCP:
+    def __init__(self, name: str, instructions: str = "") -> None:
+        self.server = Server(name, instructions=instructions)
+        self.sse_transport = SseServerTransport("/messages")
+        self._tools: list[types.Tool] = []
+        self._handlers: dict[str, Any] = {}
+
+        @self.server.list_tools()
+        async def _list_tools() -> list[types.Tool]:
+            return list(self._tools)
+
+        @self.server.call_tool()
+        async def _call_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+            handler = self._handlers.get(str(tool_name or "").strip())
+            if handler is None:
+                raise ValueError(f"Unknown tool: {tool_name}")
+            return handler(**dict(arguments or {}))
+
+    def tool(
+        self,
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        meta: dict[str, Any] | None = None,
+        structured_output: bool | None = None,
+        **_: Any,
+    ):
+        def decorator(func: Any) -> Any:
+            tool_name = str(name or func.__name__).strip()
+            tool = types.Tool(
+                name=tool_name,
+                title=str(title or "").strip() or None,
+                description=str(description or "").strip() or None,
+                inputSchema=_build_input_schema(func),
+                outputSchema={"type": "object"} if structured_output is not False else None,
+                _meta=dict(meta or {}),
+            )
+            self._tools.append(tool)
+            self._handlers[tool_name] = func
+            return func
+
+        return decorator
+
+    async def run_stdio(self) -> None:
+        async with stdio_server() as (read_stream, write_stream):
+            await self.server.run(read_stream, write_stream, self.server.create_initialization_options())
+
+    async def asgi_app(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            response = PlainTextResponse("Unsupported scope type", status_code=500)
+            await response(scope, receive, send)
+            return
+        method = str(scope.get("method") or "").upper()
+        path = str(scope.get("path") or "").rstrip("/") or "/"
+        if path == "/sse" and method == "GET":
+            async with self.sse_transport.connect_sse(scope, receive, send) as (read_stream, write_stream):
+                await self.server.run(read_stream, write_stream, self.server.create_initialization_options())
+            return
+        if path == "/messages" and method == "POST":
+            await self.sse_transport.handle_post_message(scope, receive, send)
+            return
+        response = PlainTextResponse("Not Found", status_code=404)
+        await response(scope, receive, send)
+
+
+mcp = _CompatMCP(
     "telecom-mock",
     instructions="电信客服模拟 MCP 服务器，提供客户查询、余额、用量、账单、积分、订购、推荐、下单、知识库搜索等工具。",
 )
-_FASTMCP_TOOL_KWARGS = set(inspect.signature(FastMCP.tool).parameters.keys())
 
 
 def _icon_payload(label: str, color: str) -> dict[str, Any]:
@@ -94,20 +198,12 @@ def _tool_contract(
             "cardType": card_type or template_id,
             "source": "structuredContent",
         }
-    contract: dict[str, Any] = {}
-    if "title" in _FASTMCP_TOOL_KWARGS:
-        contract["title"] = title
-    if "description" in _FASTMCP_TOOL_KWARGS:
-        contract["description"] = description
-    if "structured_output" in _FASTMCP_TOOL_KWARGS:
-        contract["structured_output"] = True
-    if "meta" in _FASTMCP_TOOL_KWARGS:
-        contract["meta"] = meta
-    if "icons" in _FASTMCP_TOOL_KWARGS:
-        icons = _tool_icons(icon_label, icon_color)
-        if icons:
-            contract["icons"] = icons
-    return contract
+    return {
+        "title": title,
+        "description": description,
+        "meta": meta,
+        "structured_output": True,
+    }
 
 
 def _fen_text(value: Any) -> str:
@@ -349,12 +445,11 @@ def main():
     args = parser.parse_args()
 
     if args.stdio:
-        mcp.run(transport="stdio")
+        asyncio.run(mcp.run_stdio())
     else:
         import uvicorn
-        app = mcp.sse_app()
         print(f"🚀 电信客服模拟 MCP 服务器启动: http://127.0.0.1:{args.port}/sse")
-        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="info")
+        uvicorn.run(mcp.asgi_app, host="127.0.0.1", port=args.port, log_level="info")
 
 
 if __name__ == "__main__":
