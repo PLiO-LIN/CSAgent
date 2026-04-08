@@ -212,6 +212,82 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
   )
 }
 
+function ToggleSwitch({
+  checked,
+  onClick,
+  label,
+  disabled = false,
+  size = 'md',
+}: {
+  checked: boolean
+  onClick: () => void
+  label?: string
+  disabled?: boolean
+  size?: 'sm' | 'md'
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={onClick}
+      className={cx(
+        'inline-flex items-center gap-2 rounded-full transition disabled:cursor-not-allowed disabled:opacity-50',
+        size === 'sm' ? 'text-xs' : 'text-sm',
+      )}
+    >
+      <span className={cx(
+        'relative rounded-full transition',
+        size === 'sm' ? 'h-6 w-11' : 'h-7 w-12',
+        checked ? 'bg-emerald-500' : 'bg-slate-300',
+      )}>
+        <span className={cx(
+          'absolute left-0.5 top-0.5 rounded-full bg-white shadow-sm transition-transform',
+          size === 'sm' ? 'h-5 w-5' : 'h-6 w-6',
+          checked ? (size === 'sm' ? 'translate-x-5' : 'translate-x-5') : 'translate-x-0',
+        )} />
+      </span>
+      {label && <span className={cx('font-medium', checked ? 'text-emerald-700' : 'text-slate-500')}>{label}</span>}
+    </button>
+  )
+}
+
+function ScopeSwitch({
+  value,
+  onChange,
+  disabled = false,
+}: {
+  value: 'global' | 'skill'
+  onChange: (value: 'global' | 'skill') => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="inline-flex items-center rounded-full border border-slate-200 bg-white p-1">
+      {[
+        { value: 'global' as const, label: '全局' },
+        { value: 'skill' as const, label: 'Skill' },
+      ].map(option => {
+        const active = value === option.value
+        return (
+          <button
+            key={option.value}
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(option.value)}
+            className={cx(
+              'rounded-full px-3 py-1 text-xs transition disabled:cursor-not-allowed disabled:opacity-50',
+              active ? 'bg-emerald-500 text-white shadow-sm' : 'text-slate-500 hover:text-emerald-600',
+            )}
+          >
+            {option.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function ResourceList<T>({
   title,
   items,
@@ -1713,6 +1789,18 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
     await consoleData.syncMcpTools()
   }
 
+  const toggleGlobalMcpEnabled = async () => {
+    const nextEnabled = !consoleData.mcpConfig.enabled
+    const saved = await consoleData.saveMcpConfig({
+      enabled: nextEnabled,
+      tool_timeout_seconds: consoleData.mcpConfig.tool_timeout_seconds,
+      servers: consoleData.mcpConfig.servers,
+    })
+    if (saved.enabled) {
+      await consoleData.syncMcpTools()
+    }
+  }
+
   const toggleMcpServerEnabled = async (targetServerName: string) => {
     const targetServer = consoleData.mcpConfig.servers[targetServerName]
     if (!targetServer) throw new Error('MCP 服务不存在')
@@ -1739,6 +1827,16 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
     await consoleData.saveTool({
       ...targetTool,
       enabled: !targetTool.enabled,
+    })
+  }
+
+  const changeToolScope = async (targetToolName: string, nextScope: 'global' | 'skill') => {
+    const targetTool = tools.find(item => item.tool_name === targetToolName)
+    if (!targetTool) throw new Error('工具不存在')
+    if (targetTool.scope === nextScope) return
+    await consoleData.saveTool({
+      ...targetTool,
+      scope: nextScope,
     })
   }
 
@@ -2280,7 +2378,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="text-lg font-semibold text-slate-900">独立工具</div>
-              <div className="mt-1 text-sm text-slate-500">先查看工具的来源、作用域和卡片能力，点击编辑后再进入弹窗维护协议字段。</div>
+              <div className="mt-1 text-sm text-slate-500">列表内可直接切换启用状态和作用域，只有改协议字段时再进入编辑弹窗。</div>
             </div>
           </div>
 
@@ -2297,15 +2395,17 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
                     <div className="flex flex-wrap justify-end gap-2">
                       <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] text-slate-600">{item.provider_type}</span>
                       {item.supports_card && <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] text-emerald-700">card</span>}
-                      {!item.enabled && <span className="rounded-full bg-slate-200 px-2.5 py-1 text-[11px] text-slate-600">已停用</span>}
                     </div>
                   </div>
                   <div className="mt-4 min-h-[68px] text-sm leading-6 text-slate-600">{item.summary || item.source_ref || '暂未填写摘要。'}</div>
                   <div className="mt-4 flex flex-wrap gap-2 text-[11px] text-slate-500">
-                    <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">作用域 {item.scope}</span>
                     {item.card_type && <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">卡片 {item.card_type}</span>}
                   </div>
-                  <div className="mt-5">
+                  <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <ToggleSwitch checked={item.enabled} onClick={() => void runAction(async () => { await toggleToolEnabled(item.tool_name) }, `工具已${item.enabled ? '停用' : '启用'}：${item.display_name || item.tool_name}`)} label={item.enabled ? '已启用' : '已停用'} />
+                      <ScopeSwitch value={item.scope === 'skill' ? 'skill' : 'global'} onChange={nextScope => void runAction(async () => { await changeToolScope(item.tool_name, nextScope) }, `工具作用域已切换为 ${nextScope}`)} />
+                    </div>
                     <button onClick={() => openToolEditor(item.tool_name)} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">编辑</button>
                   </div>
                 </div>
@@ -2319,8 +2419,9 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="text-lg font-semibold text-slate-900">MCP 服务</div>
-              <div className="mt-1 text-sm text-slate-500">服务卡片展示传输方式、同步出的工具数量，点击编辑服务或工具即可进入弹窗。</div>
+              <div className="mt-1 text-sm text-slate-500">服务和工具都支持列表内直接开关，工具也可以直接切换为全局或 Skill 作用域。</div>
             </div>
+            <ToggleSwitch checked={consoleData.mcpConfig.enabled} onClick={() => void runAction(async () => { await toggleGlobalMcpEnabled() }, `MCP 已${consoleData.mcpConfig.enabled ? '关闭' : '启用'}`)} label={consoleData.mcpConfig.enabled ? 'MCP 已启用' : 'MCP 已关闭'} />
           </div>
 
           <div className="grid gap-4 xl:grid-cols-2">
@@ -2337,7 +2438,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
                       <div className="mt-1 text-sm text-slate-500">{group.transport || '未声明 transport'} · {formatInteger(group.tools.length)} 个工具</div>
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => void runAction(async () => { await toggleMcpServerEnabled(group.name) }, `MCP 服务已${serverEnabled ? '关闭' : '启用'}：${group.name}`)} className={cx('rounded-2xl border px-3 py-2 text-xs transition', serverEnabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-200 hover:text-emerald-600')}>{serverEnabled ? '已启用' : '已停用'}</button>
+                      <ToggleSwitch checked={serverEnabled} onClick={() => void runAction(async () => { await toggleMcpServerEnabled(group.name) }, `MCP 服务已${serverEnabled ? '关闭' : '启用'}：${group.name}`)} label={serverEnabled ? '已启用' : '已停用'} size="sm" />
                       <button onClick={() => toggleToolServerExpanded(group.name)} className="rounded-full border border-slate-200 bg-white p-2 text-slate-500 transition hover:border-emerald-200 hover:text-emerald-600">
                         <ChevronRight size={14} className={cx('transition', expanded && 'rotate-90')} />
                       </button>
@@ -2361,10 +2462,9 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
                               <div className="mt-1 truncate text-xs text-slate-500">{item.summary || item.tool_name}</div>
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
-                              <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] text-slate-600">{item.scope}</span>
                               {item.supports_card && <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] text-emerald-700">card</span>}
-                              {!item.enabled && <span className="rounded-full bg-slate-200 px-2 py-1 text-[10px] text-slate-600">已停用</span>}
-                              <button onClick={() => void runAction(async () => { await toggleToolEnabled(item.tool_name) }, `工具已${item.enabled ? '停用' : '启用'}：${item.display_name || item.tool_name}`)} className={cx('rounded-xl border px-3 py-1.5 text-xs transition', item.enabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-200 hover:text-emerald-600')}>{item.enabled ? '已启用' : '已停用'}</button>
+                              <ScopeSwitch value={item.scope === 'skill' ? 'skill' : 'global'} onChange={nextScope => void runAction(async () => { await changeToolScope(item.tool_name, nextScope) }, `工具作用域已切换为 ${nextScope}`)} />
+                              <ToggleSwitch checked={item.enabled} onClick={() => void runAction(async () => { await toggleToolEnabled(item.tool_name) }, `工具已${item.enabled ? '停用' : '启用'}：${item.display_name || item.tool_name}`)} label={item.enabled ? '已启用' : '已停用'} size="sm" />
                               <button onClick={() => openToolEditor(item.tool_name)} className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">编辑工具</button>
                             </div>
                           </div>
