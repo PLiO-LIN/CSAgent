@@ -115,6 +115,17 @@ export interface McpProbeResult {
   tools: McpProbeToolRecord[]
 }
 
+export interface ModelProbeResult {
+  ok: boolean
+  vendor_id: string
+  model_id: string
+  base_url: string
+  chat_model: string
+  latency_ms: number
+  message: string
+  usage: Record<string, any>
+}
+
 type AgentRecord = FrameworkInfo['agents'][number]
 type ToolRecord = FrameworkInfo['tools'][number]
 type SkillRecord = FrameworkInfo['skills'][number]
@@ -336,6 +347,32 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     } finally {
       setRegistryRefreshing(false)
     }
+  }, [])
+
+  const testModelConfig = useCallback(async (payload: {
+    api_key?: string
+    base_url?: string
+    chat_model?: string
+    active_vendor?: string
+    active_model?: string
+    vendors?: ModelCatalogVendor[]
+  }) => {
+    const resp = await fetch('/api/framework/model-config/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!resp.ok) {
+      let message = '模型测试失败'
+      try {
+        const data = await resp.json()
+        message = data?.detail || message
+      } catch {
+        message = await resp.text() || message
+      }
+      throw new Error(message)
+    }
+    return await resp.json() as ModelProbeResult
   }, [])
 
   const saveAgent = useCallback(async (payload: AgentRecord) => {
@@ -766,6 +803,7 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     configError,
     refreshModelConfig,
     saveModelConfig,
+    testModelConfig,
     mcpConfig,
     mcpLoading,
     mcpSaving,

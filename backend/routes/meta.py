@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from openai import AsyncOpenAI
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import McpServerSettings, get_mcp_config_payload, get_model_config_payload, patch_settings, settings
+from config import McpServerSettings, get_mcp_config_payload, get_model_config_payload, patch_settings, resolve_llm_selection, settings
 from db.engine import get_db
 from framework_profile import load_framework_profile, patch_framework_profile
 from mcp_runtime import inspect_mcp_server
@@ -26,6 +28,15 @@ class ModelConfigPatchReq(BaseModel):
     base_url: str | None = None
     chat_model: str | None = None
     embed_model: str | None = None
+    active_vendor: str | None = None
+    active_model: str | None = None
+    vendors: list[dict[str, Any]] | None = None
+
+
+class ModelConfigProbeReq(BaseModel):
+    api_key: str | None = None
+    base_url: str | None = None
+    chat_model: str | None = None
     active_vendor: str | None = None
     active_model: str | None = None
     vendors: list[dict[str, Any]] | None = None
@@ -86,6 +97,57 @@ async def update_model_config(req: ModelConfigPatchReq):
         normalized["llm_vendors"] = payload["vendors"]
     updated = patch_settings(normalized, preserve_blank_fields={"api_key"})
     return get_model_config_payload(updated)
+
+
+@router.post("/model-config/test")
+async def test_model_config(req: ModelConfigProbeReq):
+    payload = req.model_dump(exclude_none=True)
+    resolved = resolve_llm_selection({
+        "vendor_id": payload.get("active_vendor"),
+        "model_id": payload.get("active_model"),
+        "base_url": payload.get("base_url"),
+        "chat_model": payload.get("chat_model"),
+        "vendors": payload.get("vendors"),
+    })
+    api_key = str(payload.get("api_key") or settings.api_key or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="请先填写 API Key")
+    base_url = str(resolved.get("base_url") or "").strip()
+    model = str(resolved.get("chat_model") or "").strip()
+    if not base_url or not model:
+        raise HTTPException(status_code=400, detail="请先选择可用的厂商和模型")
+
+    client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+    started_at = time.perf_counter()
+    try:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": "Reply with OK only."}],
+            temperature=0,
+            max_tokens=8,
+            stream=False,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+    message = ""
+    if getattr(response, "choices", None):
+        first_choice = response.choices[0] if response.choices else None
+        if first_choice and getattr(first_choice, "message", None):
+            message = str(first_choice.message.content or "").strip()
+    usage = getattr(response, "usage", None)
+    usage_payload = usage.model_dump(mode="json") if usage and hasattr(usage, "model_dump") else {}
+    return {
+        "ok": True,
+        "vendor_id": str(resolved.get("vendor_id") or ""),
+        "model_id": str(resolved.get("model_id") or ""),
+        "base_url": base_url,
+        "chat_model": model,
+        "latency_ms": elapsed_ms,
+        "message": message,
+        "usage": usage_payload,
+    }
 
 
 @router.get("/mcp-config")

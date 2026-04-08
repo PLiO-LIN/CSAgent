@@ -653,7 +653,13 @@ def get_llm_catalog(source: Settings | None = None) -> tuple[list[LlmVendorSetti
 def resolve_llm_selection(model_settings: dict[str, Any] | None = None, source: Settings | None = None) -> dict[str, str]:
     current = source or settings
     settings_map = dict(model_settings or {})
-    vendors, default_vendor_id, default_model_id = get_llm_catalog(current)
+    vendors_override = settings_map.get("vendors")
+    if vendors_override is None:
+        vendors, default_vendor_id, default_model_id = get_llm_catalog(current)
+    else:
+        vendors = _ensure_default_llm_vendors(vendors_override)
+        default_vendor_id = str(settings_map.get("vendor_id") or current.llm_active_vendor or "").strip()
+        default_model_id = str(settings_map.get("model_id") or current.llm_active_model or "").strip()
     selected_vendor_id = str(settings_map.get("vendor_id") or default_vendor_id or "").strip()
     selected_model_id = str(settings_map.get("model_id") or default_model_id or "").strip()
 

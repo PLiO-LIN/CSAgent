@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
-import { Bot, Brain, ChevronRight, Cpu, History, LayoutDashboard, Plus, RefreshCw, Save, SendHorizontal, Sparkles, Trash2, Wrench } from 'lucide-react'
+import { Bot, Brain, ChevronRight, Cpu, LayoutDashboard, Plus, RefreshCw, Save, SendHorizontal, Sparkles, Trash2, Wrench } from 'lucide-react'
 import ChatWorkspace from './ChatWorkspace'
 import CardRenderer from './CardRenderer'
-import { usePlatformConsole, type McpProbeResult, type ModelCatalogVendor } from '../hooks/usePlatformConsole'
+import { usePlatformConsole, type McpProbeResult, type ModelCatalogVendor, type ModelProbeResult } from '../hooks/usePlatformConsole'
 import { type UseChatController } from '../hooks/useChat'
 import { type FrameworkInfo, type FrameworkProfile } from '../hooks/useFrameworkProfile'
 import { resolveChatActionInput } from '../lib/chatDisplay'
@@ -23,7 +23,7 @@ import {
   toolFormToPayload,
 } from '../lib/platformConsoleForms'
 
-type ViewKey = 'overview' | 'models' | 'agents' | 'tools' | 'skills' | 'cards' | 'sessions' | 'agent-chat'
+type ViewKey = 'overview' | 'models' | 'agents' | 'tools' | 'skills' | 'cards' | 'agent-chat'
 
 interface McpServerDraft {
   name: string
@@ -57,7 +57,6 @@ const NAV_ITEMS: Array<{ key: ViewKey; label: string; icon: any }> = [
   { key: 'tools', label: '工具', icon: Wrench },
   { key: 'skills', label: '技能', icon: Brain },
   { key: 'cards', label: '卡片', icon: Sparkles },
-  { key: 'sessions', label: '记录', icon: History },
 ]
 
 const EMPTY_MCP_SERVER_DRAFT: McpServerDraft = {
@@ -127,6 +126,45 @@ function Area(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
       {...props}
       className={cx('w-full rounded-2xl border border-slate-200 bg-[#f8fcfb] px-4 py-3 text-sm leading-6 text-slate-800 outline-none transition focus:border-emerald-300 focus:bg-white', props.className)}
     />
+  )
+}
+
+function Modal({
+  open,
+  onClose,
+  title,
+  description,
+  widthClass = 'max-w-5xl',
+  children,
+}: {
+  open: boolean
+  onClose: () => void
+  title: string
+  description?: string
+  widthClass?: string
+  children: ReactNode
+}) {
+  if (!open) return null
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/35 p-4" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        className={cx('max-h-[92vh] w-full overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-[0_40px_120px_rgba(15,23,42,0.18)]', widthClass)}
+        onClick={event => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <div className="text-lg font-semibold text-slate-900">{title}</div>
+            {description && <div className="mt-1 text-sm text-slate-500">{description}</div>}
+          </div>
+          <button onClick={onClose} className="rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">关闭</button>
+        </div>
+        <div className="max-h-[calc(92vh-96px)] overflow-auto px-6 py-5">
+          {children}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -346,8 +384,17 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
   const [cardPreviewActionText, setCardPreviewActionText] = useState('')
   const [mcpServerDraft, setMcpServerDraft] = useState<McpServerDraft>(EMPTY_MCP_SERVER_DRAFT)
   const [mcpProbeResult, setMcpProbeResult] = useState<McpProbeResult | null>(null)
+  const [modelProbeResult, setModelProbeResult] = useState<ModelProbeResult | null>(null)
   const [cardInspectPath, setCardInspectPath] = useState('')
   const [cardMetaDrawerOpen, setCardMetaDrawerOpen] = useState(true)
+  const [vendorCreateDialogOpen, setVendorCreateDialogOpen] = useState(false)
+  const [modelCreateDialogOpen, setModelCreateDialogOpen] = useState(false)
+  const [modelEditorOpen, setModelEditorOpen] = useState(false)
+  const [toolEditorOpen, setToolEditorOpen] = useState(false)
+  const [mcpServerDialogOpen, setMcpServerDialogOpen] = useState(false)
+  const [skillEditorOpen, setSkillEditorOpen] = useState(false)
+  const [cardTemplateDialogOpen, setCardTemplateDialogOpen] = useState(false)
+  const [cardBindingDialogOpen, setCardBindingDialogOpen] = useState(false)
 
   const agents = consoleData.agents
   const tools = consoleData.tools
@@ -433,6 +480,15 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
     () => selectedAgentSessionOwner ? consoleData.sessions.filter(item => item.agent_id === selectedAgentSessionOwner) : [],
     [consoleData.sessions, selectedAgentSessionOwner],
   )
+  const activeAgentSessionOwner = String(activeAgentForChat?.agent_id || '').trim()
+  const activeAgentSessions = useMemo(
+    () => activeAgentSessionOwner ? consoleData.sessions.filter(item => item.agent_id === activeAgentSessionOwner) : [],
+    [consoleData.sessions, activeAgentSessionOwner],
+  )
+  const selectedActiveAgentSession = useMemo(
+    () => activeAgentSessions.find(item => item.id === consoleData.selectedSessionId) || null,
+    [activeAgentSessions, consoleData.selectedSessionId],
+  )
 
   useEffect(() => {
     const nextDraft = {
@@ -447,6 +503,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
     }
     setModelDraft(nextDraft)
     setVendorId(nextDraft.active_vendor || nextDraft.vendors[0]?.vendor_id || '')
+    setModelProbeResult(null)
   }, [
     consoleData.modelConfig.active_model,
     consoleData.modelConfig.active_vendor,
@@ -559,13 +616,20 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
     }
   }, [selectedCard, tools, skills])
 
+  useEffect(() => {
+    if (view !== 'agent-chat') return
+    const nextSessionId = activeAgentSessions.find(item => item.id === consoleData.selectedSessionId)?.id || activeAgentSessions[0]?.id || ''
+    if (consoleData.selectedSessionId === nextSessionId) return
+    void consoleData.selectSession(nextSessionId)
+  }, [view, activeAgentSessions, consoleData.selectedSessionId, consoleData.selectSession])
+
   const overviewStats = useMemo<Array<{ label: string; value: string; onClick: () => void }>>(() => [
     { label: '模型', value: String(consoleData.stats.modelsReady), onClick: () => setView('models') },
     { label: '智能体', value: String(consoleData.stats.agents), onClick: () => setView('agents') },
     { label: '工具', value: String(consoleData.stats.tools), onClick: () => setView('tools') },
     { label: '技能', value: String(consoleData.stats.skills), onClick: () => setView('skills') },
     { label: '卡片', value: String(consoleData.stats.cards), onClick: () => setView('cards') },
-    { label: '会话', value: String(consoleData.stats.sessions), onClick: () => setView('sessions') },
+    { label: '会话', value: String(consoleData.stats.sessions), onClick: () => setView('agents') },
   ], [consoleData.stats])
 
   const agentFlags: Array<{ label: string; key: 'enabled' | 'is_default' | 'published'; value: boolean }> = [
@@ -667,13 +731,6 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
     }))
   }
 
-  const openSessionRecord = (sessionId: string) => {
-    const id = String(sessionId || '').trim()
-    if (!id) return
-    void consoleData.selectSession(id)
-    setView('sessions')
-  }
-
   const isVendorExpanded = (targetVendorId: string) => {
     if (Object.prototype.hasOwnProperty.call(modelVendorExpanded, targetVendorId)) {
       return Boolean(modelVendorExpanded[targetVendorId])
@@ -714,6 +771,57 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
     setVendorCreateOpen(false)
     setModelCreateDraft(EMPTY_MODEL_CREATE_DRAFT)
     setModelCreateVendorId(prev => prev === targetVendorId ? '' : targetVendorId)
+  }
+
+  const openVendorCreateDialog = () => {
+    setVendorCreateDraft(EMPTY_VENDOR_CREATE_DRAFT)
+    setVendorCreateOpen(false)
+    setVendorCreateDialogOpen(true)
+  }
+
+  const openModelCreateDialog = (targetVendorId: string) => {
+    focusVendor(targetVendorId)
+    setModelCreateDraft(EMPTY_MODEL_CREATE_DRAFT)
+    setModelCreateVendorId(targetVendorId)
+    setModelCreateDialogOpen(true)
+  }
+
+  const openModelEditor = (targetVendorId: string, targetModelId = '') => {
+    focusVendor(targetVendorId)
+    if (targetModelId) {
+      setModelDraft(prev => ({
+        ...prev,
+        active_vendor: targetVendorId,
+        active_model: targetModelId,
+      }))
+    }
+    setModelProbeResult(null)
+    setModelEditorOpen(true)
+  }
+
+  const openToolEditor = (targetToolName: string) => {
+    focusTool(targetToolName)
+    setToolEditorOpen(true)
+  }
+
+  const openMcpServerDialog = (targetServerName: string) => {
+    setMcpServerName(targetServerName)
+    setMcpServerDialogOpen(true)
+  }
+
+  const openSkillEditor = (targetSkillName: string) => {
+    setSkillName(targetSkillName)
+    setSkillEditorOpen(true)
+  }
+
+  const openCardTemplateDialog = (targetTemplateId: string) => {
+    setCardTemplateId(targetTemplateId)
+    setCardTemplateDialogOpen(true)
+  }
+
+  const openCardBindingDialog = (targetCardId: string) => {
+    setCardId(targetCardId)
+    setCardBindingDialogOpen(true)
   }
 
   const isToolServerExpanded = (targetServerName: string) => {
@@ -869,17 +977,28 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
     await persistModelDraft(nextDraft)
   }
 
+  const probeModelSelection = async (targetVendorId: string, targetModelId: string) => {
+    const vendor = modelDraft.vendors.find(item => item.vendor_id === targetVendorId) || null
+    const model = vendor?.models.find(item => item.model_id === targetModelId) || null
+    const result = await consoleData.testModelConfig({
+      api_key: modelDraft.api_key,
+      active_vendor: targetVendorId,
+      active_model: targetModelId,
+      base_url: vendor?.base_url || '',
+      chat_model: model?.chat_model || '',
+      vendors: modelDraft.vendors,
+    })
+    setModelProbeResult(result)
+    return result
+  }
+
   const saveMcpMeta = async () => {
     await consoleData.saveMcpConfig({
       enabled: mcpMetaDraft.enabled,
       tool_timeout_seconds: mcpMetaDraft.tool_timeout_seconds,
       servers: consoleData.mcpConfig.servers,
     })
-    if (mcpMetaDraft.enabled) {
-      await consoleData.syncMcpTools()
-    } else {
-      await consoleData.refreshRegistry()
-    }
+    await consoleData.syncMcpTools()
   }
 
   const buildMcpServerConfig = () => {
@@ -928,9 +1047,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
       servers: currentServers,
     })
     setMcpServerName(targetName)
-    if (mcpMetaDraft.enabled) {
-      await consoleData.syncMcpTools()
-    }
+    await consoleData.syncMcpTools()
     setBanner(`MCP 服务已接入，发现 ${probe.count} 个工具`)
   }
 
@@ -946,11 +1063,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
     })
     setMcpServerName(Object.keys(currentServers)[0] || '')
     setMcpProbeResult(null)
-    if (mcpMetaDraft.enabled) {
-      await consoleData.syncMcpTools()
-    } else {
-      await consoleData.refreshRegistry()
-    }
+    await consoleData.syncMcpTools()
   }
 
   const renderOverview = () => (
@@ -966,7 +1079,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
 
       <div className="grid gap-5 xl:grid-cols-[1.08fr_0.92fr]">
         <Surface className="p-6">
-          <div className="mb-5 flex items-center justify-between">
+          <div className="mb-5 flex items-center justify-between gap-3">
             <div>
               <div className="text-lg font-semibold text-slate-900">模型目录</div>
               <div className="mt-1 text-sm text-slate-500">当前默认：{activeModelDraft.vendor?.display_name || '未选择'} / {activeModelDraft.model?.display_name || '未选择'}</div>
@@ -994,7 +1107,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
         </Surface>
 
         <Surface className="p-6">
-          <div className="mb-4 text-lg font-semibold text-slate-900">智能体</div>
+          <div className="mb-4 text-lg font-semibold text-slate-900">对话工作台</div>
           <div className="space-y-3">
             {agents.slice(0, 4).map(item => (
               <div key={item.agent_id} className="flex items-center justify-between rounded-2xl border border-slate-200 bg-[#fbfefd] px-4 py-3">
@@ -1014,25 +1127,10 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
 
       <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
         <Surface className="p-6">
-          <div className="mb-4 text-lg font-semibold text-slate-900">最近会话</div>
-          <div className="space-y-3">
-            {consoleData.sessions.slice(0, 5).map(item => (
-              <button key={item.id} onClick={() => openSessionRecord(item.id)} className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-[#fbfefd] px-4 py-3 text-left transition hover:border-emerald-200">
-                <div>
-                  <div className="text-sm font-medium text-slate-900">{item.title || item.id}</div>
-                  <div className="text-xs text-slate-500">{item.agent_id || 'default'} · {formatTime(item.updated_at || item.created_at)}</div>
-                </div>
-                <ChevronRight size={14} className="text-slate-400" />
-              </button>
-            ))}
-          </div>
-        </Surface>
-
-        <Surface className="p-6">
           <div className="mb-4 text-lg font-semibold text-slate-900">卡片协议</div>
           <div className="flex flex-wrap gap-2">
             {consoleData.cardCatalog.slice(0, 10).map(item => (
-              <button key={item.id} onClick={() => { setCardId(item.id); setView('cards') }} className="rounded-full border border-slate-200 bg-[#fbfefd] px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">
+              <button key={item.id} onClick={() => { setCardsMode('bindings'); openCardBindingDialog(item.id); setView('cards') }} className="rounded-full border border-slate-200 bg-[#fbfefd] px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">
                 {item.card_type}
               </button>
             ))}
@@ -1051,13 +1149,13 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
               <div className="text-sm font-semibold text-slate-900">厂商目录</div>
               <div className="mt-1 text-xs text-slate-500">展开厂商即可查看已登记模型，并在厂商下直接新增模型。</div>
             </div>
-            <button onClick={toggleVendorCreate} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">
+            <button onClick={openVendorCreateDialog} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">
               <Plus size={14} />
               添加厂商
             </button>
           </div>
 
-          {(vendorCreateOpen || !modelDraft.vendors.length) && (
+          {vendorCreateOpen && (
             <div className="mb-4 rounded-[24px] border border-dashed border-emerald-200 bg-emerald-50/40 p-4">
               <div className="grid gap-3">
                 <Field label="厂商 ID"><Input value={vendorCreateDraft.vendor_id} onChange={e => setVendorCreateDraft(prev => ({ ...prev, vendor_id: e.target.value }))} placeholder="例如 siliconflow" /></Field>
@@ -1085,7 +1183,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
                     <button onClick={() => toggleVendorExpanded(vendor.vendor_id)} className="mt-0.5 rounded-full border border-slate-200 bg-white p-2 text-slate-500 transition hover:border-emerald-200 hover:text-emerald-600">
                       <ChevronRight size={14} className={cx('transition', expanded && 'rotate-90')} />
                     </button>
-                    <button onClick={() => focusVendor(vendor.vendor_id)} className="min-w-0 flex-1 text-left">
+                    <button onClick={() => openModelEditor(vendor.vendor_id)} className="min-w-0 flex-1 text-left">
                       <div className="flex flex-wrap items-center gap-2">
                         <div className="text-sm font-medium text-slate-900">{vendor.display_name || vendor.vendor_id}</div>
                         {modelDraft.active_vendor === vendor.vendor_id && <span className="rounded-full bg-emerald-100 px-2 py-1 text-[11px] text-emerald-700">默认厂商</span>}
@@ -1094,7 +1192,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
                       <div className="mt-1 truncate text-xs text-slate-500">{vendor.base_url || vendor.vendor_id}</div>
                       <div className="mt-2 text-[11px] text-slate-400">{vendor.models.length} 个模型</div>
                     </button>
-                    <button onClick={() => toggleVendorModelCreate(vendor.vendor_id)} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">
+                    <button onClick={() => openModelCreateDialog(vendor.vendor_id)} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">
                       <Plus size={12} />添加模型
                     </button>
                   </div>
@@ -1103,7 +1201,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
                     <div className="mt-4 border-t border-slate-200 pt-4">
                       <div className="space-y-2">
                         {vendor.models.map(model => (
-                          <button key={model.model_id} onClick={() => focusVendor(vendor.vendor_id)} className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:border-emerald-200 hover:bg-emerald-50/40">
+                          <button key={model.model_id} onClick={() => openModelEditor(vendor.vendor_id, model.model_id)} className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:border-emerald-200 hover:bg-emerald-50/40">
                             <div className="min-w-0">
                               <div className="truncate text-sm font-medium text-slate-900">{model.display_name || model.model_id}</div>
                               <div className="mt-1 truncate text-xs text-slate-500">{model.chat_model || model.model_id}</div>
@@ -1220,7 +1318,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
               <div className="flex flex-wrap items-center gap-2">
                 <Chip active={selectedVendor.enabled} onClick={() => updateVendor(selectedVendor.vendor_id, { enabled: !selectedVendor.enabled })}>厂商启用</Chip>
                 <Chip active={modelDraft.active_vendor === selectedVendor.vendor_id} onClick={() => setModelDraft(prev => ({ ...prev, active_vendor: selectedVendor.vendor_id, active_model: selectedVendor.models[0]?.model_id || '' }))}>设为默认厂商</Chip>
-                <button onClick={() => toggleVendorModelCreate(selectedVendor.vendor_id)} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><Plus size={12} />在此厂商下添加模型</button>
+                <button onClick={() => openModelCreateDialog(selectedVendor.vendor_id)} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><Plus size={12} />在此厂商下添加模型</button>
               </div>
 
               <Surface className="border-dashed p-4">
@@ -1239,12 +1337,21 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
                       <div className="mt-4 flex flex-wrap items-center gap-2">
                         <Chip active={model.enabled} onClick={() => updateVendorModel(selectedVendor.vendor_id, model.model_id, { enabled: !model.enabled })}>模型启用</Chip>
                         <Chip active={modelDraft.active_vendor === selectedVendor.vendor_id && modelDraft.active_model === model.model_id} onClick={() => setModelDraft(prev => ({ ...prev, active_vendor: selectedVendor.vendor_id, active_model: model.model_id }))}>设为默认模型</Chip>
+                        <button onClick={() => void runAction(async () => { await probeModelSelection(selectedVendor.vendor_id, model.model_id) }, '模型测试通过')} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><Sparkles size={12} />测试连通性</button>
                       </div>
                     </div>
                   ))}
                   {!selectedVendor.models.length && <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-5 text-sm text-slate-500">当前厂商还没有模型，可在左侧厂商卡片下直接添加。</div>}
                 </div>
               </Surface>
+
+              {modelProbeResult && (
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
+                  <div className="text-sm font-semibold text-slate-900">模型测试通过</div>
+                  <div className="mt-1 text-xs text-slate-600">{modelProbeResult.vendor_id} / {modelProbeResult.model_id} · {modelProbeResult.chat_model} · {modelProbeResult.latency_ms} ms</div>
+                  <div className="mt-3 text-xs leading-6 text-slate-600">返回内容：{modelProbeResult.message || '—'}</div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="mt-6 rounded-2xl border border-dashed border-slate-200 px-4 py-5 text-sm text-slate-500">先从左侧选择一个厂商，或直接添加新的厂商。</div>
@@ -1413,28 +1520,15 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
         </div>
 
         <Surface className="mt-5 p-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-medium text-slate-900">最近对话记录</div>
-              <div className="mt-1 text-xs text-slate-500">当前智能体的会话会优先挂在这里，平台会话页仍保留全局视角。</div>
+              <div className="text-sm font-medium text-slate-900">对话记录</div>
+              <div className="mt-1 text-xs text-slate-500">该智能体的历史记录已收拢到对话页查看。进入对话后，可按会话切换并查看消息明细。</div>
             </div>
-            <button onClick={() => setView('sessions')} className="rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">查看全部</button>
-          </div>
-          <div className="space-y-3">
-            {selectedAgentSessions.slice(0, 5).map(item => (
-              <button key={item.id} onClick={() => openSessionRecord(item.id)} className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-[#fbfefd] px-4 py-3 text-left transition hover:border-emerald-200">
-                <div>
-                  <div className="text-sm font-medium text-slate-900">{item.title || item.id}</div>
-                  <div className="text-xs text-slate-500">{formatTime(item.updated_at || item.created_at)}</div>
-                </div>
-                <ChevronRight size={14} className="text-slate-400" />
-              </button>
-            ))}
-            {!selectedAgentSessions.length && (
-              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-5 text-sm text-slate-500">
-                {selectedAgentSessionOwner ? '当前智能体还没有会话记录。' : '保存或选择一个智能体后，这里会展示它的会话记录。'}
-              </div>
-            )}
+            <div className="flex items-center gap-3">
+              <div className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">{selectedAgentSessions.length} 条会话</div>
+              <button onClick={() => openAgentChat(agentForm.agent_id || selectedAgent?.agent_id || '')} disabled={!(agentForm.agent_id || selectedAgent?.agent_id)} className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm text-white transition hover:bg-slate-800 disabled:opacity-40"><SendHorizontal size={14} />进入对话查看</button>
+            </div>
           </div>
         </Surface>
       </Surface>
@@ -1451,8 +1545,8 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
               <div className="mt-1 text-xs text-slate-500">直接查看所有工具；MCP 服务可折叠展开，查看其下工具。</div>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button onClick={() => focusTool(NEW_KEY)} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><Plus size={14} />协议工具</button>
-              <button onClick={() => setMcpServerName(NEW_KEY)} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><Plus size={14} />新增 MCP</button>
+              <button onClick={() => openToolEditor(NEW_KEY)} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><Plus size={14} />协议工具</button>
+              <button onClick={() => openMcpServerDialog(NEW_KEY)} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><Plus size={14} />新增 MCP</button>
             </div>
           </div>
 
@@ -1460,12 +1554,12 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
             <div>
               <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-400">工具</div>
               <div className="space-y-2">
-                <button onClick={() => focusTool(NEW_KEY)} className={cx('w-full rounded-2xl border px-4 py-3 text-left transition', toolName === NEW_KEY ? 'border-emerald-200 bg-emerald-50/70' : 'border-slate-200 bg-[#fbfefd] hover:border-emerald-100 hover:bg-emerald-50/40')}>
+                <button onClick={() => openToolEditor(NEW_KEY)} className={cx('w-full rounded-2xl border px-4 py-3 text-left transition', toolName === NEW_KEY ? 'border-emerald-200 bg-emerald-50/70' : 'border-slate-200 bg-[#fbfefd] hover:border-emerald-100 hover:bg-emerald-50/40')}>
                   <div className="text-sm font-medium text-slate-900">新增协议工具</div>
                   <div className="mt-1 text-xs text-slate-500">手动登记协议接入工具</div>
                 </button>
                 {standaloneTools.map(item => (
-                  <button key={item.tool_name} onClick={() => focusTool(item.tool_name)} className={cx('w-full rounded-2xl border px-4 py-3 text-left transition', toolName === item.tool_name ? 'border-emerald-200 bg-emerald-50/70' : 'border-slate-200 bg-[#fbfefd] hover:border-emerald-100 hover:bg-emerald-50/40')}>
+                  <button key={item.tool_name} onClick={() => openToolEditor(item.tool_name)} className={cx('w-full rounded-2xl border px-4 py-3 text-left transition', toolName === item.tool_name ? 'border-emerald-200 bg-emerald-50/70' : 'border-slate-200 bg-[#fbfefd] hover:border-emerald-100 hover:bg-emerald-50/40')}>
                     <div className="text-sm font-medium text-slate-900">{item.display_name || item.tool_name}</div>
                     <div className="mt-1 text-xs text-slate-500">{item.provider_type || 'protocol'} · {item.summary || item.source_ref || '未填写摘要'}</div>
                   </button>
@@ -1477,7 +1571,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
             <div>
               <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-400">MCP</div>
               <div className="space-y-3">
-                <button onClick={() => setMcpServerName(NEW_KEY)} className={cx('w-full rounded-2xl border px-4 py-3 text-left transition', mcpServerName === NEW_KEY ? 'border-emerald-200 bg-emerald-50/70' : 'border-slate-200 bg-[#fbfefd] hover:border-emerald-100 hover:bg-emerald-50/40')}>
+                <button onClick={() => openMcpServerDialog(NEW_KEY)} className={cx('w-full rounded-2xl border px-4 py-3 text-left transition', mcpServerName === NEW_KEY ? 'border-emerald-200 bg-emerald-50/70' : 'border-slate-200 bg-[#fbfefd] hover:border-emerald-100 hover:bg-emerald-50/40')}>
                   <div className="text-sm font-medium text-slate-900">新增 MCP 服务</div>
                   <div className="mt-1 text-xs text-slate-500">配置地址 / 命令并测试后接入</div>
                 </button>
@@ -1489,7 +1583,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
                         <button onClick={() => toggleToolServerExpanded(group.name)} className="mt-0.5 rounded-full border border-slate-200 bg-white p-2 text-slate-500 transition hover:border-emerald-200 hover:text-emerald-600">
                           <ChevronRight size={14} className={cx('transition', expanded && 'rotate-90')} />
                         </button>
-                        <button onClick={() => focusMcpServer(group.name)} className="min-w-0 flex-1 text-left">
+                        <button onClick={() => openMcpServerDialog(group.name)} className="min-w-0 flex-1 text-left">
                           <div className="flex flex-wrap items-center gap-2">
                             <div className="text-sm font-medium text-slate-900">{group.name}</div>
                             {group.transport && <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] text-slate-600">{group.transport}</span>}
@@ -1502,7 +1596,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
                         <div className="mt-4 border-t border-slate-200 pt-4">
                           <div className="space-y-2">
                             {group.tools.map(item => (
-                              <button key={item.tool_name} onClick={() => focusTool(item.tool_name)} className={cx('flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition', toolName === item.tool_name ? 'border-emerald-200 bg-white' : 'border-slate-200 bg-white hover:border-emerald-100 hover:bg-emerald-50/40')}>
+                              <button key={item.tool_name} onClick={() => openToolEditor(item.tool_name)} className={cx('flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition', toolName === item.tool_name ? 'border-emerald-200 bg-white' : 'border-slate-200 bg-white hover:border-emerald-100 hover:bg-emerald-50/40')}>
                                 <div className="min-w-0">
                                   <div className="truncate text-sm font-medium text-slate-900">{item.display_name || item.tool_name}</div>
                                   <div className="mt-1 truncate text-xs text-slate-500">{item.summary || item.tool_name}</div>
@@ -1692,7 +1786,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
 
   const renderSkills = () => (
     <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
-      <ResourceList title="技能" items={skills} selectedKey={skillName} onSelect={setSkillName} onNew={() => setSkillName(NEW_KEY)} getKey={item => item.skill_name} getTitle={item => item.display_name || item.skill_name} getMeta={item => item.summary} newLabel="新增技能" />
+      <ResourceList title="技能" items={skills} selectedKey={skillName} onSelect={openSkillEditor} onNew={() => openSkillEditor(NEW_KEY)} getKey={item => item.skill_name} getTitle={item => item.display_name || item.skill_name} getMeta={item => item.summary} newLabel="新增技能" />
       <Surface className="p-6">
         <div className="mb-5 flex items-center justify-between">
           <div>
@@ -1750,14 +1844,14 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
                 <div className="text-lg font-semibold text-slate-900">卡片预览</div>
                 <div className="mt-1 text-sm text-slate-500">先看卡片，再点进元数据。悬停预览字段时，右侧 JSON 会高亮对应参数。</div>
               </div>
-              <button onClick={() => setCardTemplateId(NEW_KEY)} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><Plus size={14} />新增模板</button>
+              <button onClick={() => openCardTemplateDialog(NEW_KEY)} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><Plus size={14} />新增模板</button>
             </div>
             {cardTemplateGallery.length ? (
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {cardTemplateGallery.map(item => {
                   const active = cardTemplateId === item.template.template_id
                   return (
-                    <button key={item.template.template_id} onClick={() => setCardTemplateId(item.template.template_id)} className={cx('overflow-hidden rounded-[26px] border p-3 text-left transition', active ? 'border-emerald-300 bg-emerald-50/40' : 'border-slate-200 bg-[#fbfefd] hover:border-emerald-200 hover:bg-emerald-50/30')}>
+                    <button key={item.template.template_id} onClick={() => openCardTemplateDialog(item.template.template_id)} className={cx('overflow-hidden rounded-[26px] border p-3 text-left transition', active ? 'border-emerald-300 bg-emerald-50/40' : 'border-slate-200 bg-[#fbfefd] hover:border-emerald-200 hover:bg-emerald-50/30')}>
                       <div className="mb-2 flex items-center justify-between gap-3 px-2">
                         <div>
                           <div className="text-sm font-semibold text-slate-900">{item.template.display_name || item.template.template_id}</div>
@@ -1774,7 +1868,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
             )}
           </Surface>
 
-          {cardTemplateId && (
+          {cardTemplateId && !cardTemplateDialogOpen && (
             <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
               <div className="space-y-5">
                 <Surface className="p-6">
@@ -1901,8 +1995,8 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
         </div>
       ) : (
         <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
-          <ResourceList title="卡片协议" items={consoleData.cardCatalog} selectedKey={cardId} onSelect={setCardId} getKey={item => item.id} getTitle={item => item.card_type} getMeta={item => `${item.source_kind} · ${item.source_name}`} />
-          {selectedCard ? (
+          <ResourceList title="卡片协议" items={consoleData.cardCatalog} selectedKey={cardId} onSelect={openCardBindingDialog} getKey={item => item.id} getTitle={item => item.card_type} getMeta={item => `${item.source_kind} · ${item.source_name}`} />
+          {selectedCard && !cardBindingDialogOpen ? (
             <Surface className="p-6">
               <div className="mb-5 flex items-center justify-between">
                 <div className="text-lg font-semibold text-slate-900">{selectedCard.card_type}</div>
@@ -1961,39 +2055,85 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
               )}
             </Surface>
           ) : (
-            <Surface className="p-6 text-sm text-slate-500">暂无卡片协议</Surface>
+            <Surface className="p-6 text-sm text-slate-500">点击左侧卡片协议，可在弹窗中查看详情。</Surface>
           )}
         </div>
       )}
     </div>
   )
 
-  const renderSessions = () => (
-    <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
-      <ResourceList title="对话记录" items={consoleData.sessions} selectedKey={consoleData.selectedSessionId} onSelect={value => { void consoleData.selectSession(value) }} getKey={item => item.id} getTitle={item => item.title || item.id} getMeta={item => `${item.agent_id || 'default'} · ${formatTime(item.updated_at || item.created_at)}`} />
-      <Surface className="p-6">
-        <div className="mb-4 text-lg font-semibold text-slate-900">消息</div>
-        <div className="space-y-3">
-          {consoleData.sessionMessages.map(item => (
-            <div key={item.id} className="rounded-2xl border border-slate-200 bg-[#fbfefd] p-4">
-              <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
-                <span>{item.role} · {item.agent || 'default'} · {item.model || '—'}</span>
-                <span>{formatTime(item.created_at)}</span>
-              </div>
-              <div className="mt-3 space-y-2">
-                {item.parts.map((part, index) => (
-                  <div key={`${item.id}-${index}`} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-emerald-600">{part.type}</div>
-                    <div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{part.content || '—'}</div>
-                  </div>
-                ))}
-              </div>
+  const renderAgentChat = () => (
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+      <ChatWorkspace
+        agent={activeAgentForChat ? { agent_id: activeAgentForChat.agent_id, name: activeAgentForChat.name, description: activeAgentForChat.description, agent_variables: activeAgentForChat.agent_variables || [] } : null}
+        chat={chat}
+        modelReady={consoleData.modelConfig.has_api_key}
+        quickActions={profile.ui.quick_actions}
+        onBack={() => setView('agents')}
+      />
+      <div className="space-y-5">
+        <Surface className="p-4">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-slate-900">历史会话</div>
+              <div className="mt-1 text-xs text-slate-500">{activeAgentSessionOwner ? '仅展示当前智能体的对话记录。' : '先从智能体详情进入对话，再查看该智能体的历史记录。'}</div>
             </div>
-          ))}
-        </div>
-      </Surface>
+            <button onClick={() => void consoleData.refreshSessions()} className="rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">刷新</button>
+          </div>
+          <div className="space-y-2">
+            {activeAgentSessions.map(item => (
+              <button key={item.id} onClick={() => { void consoleData.selectSession(item.id) }} className={cx('w-full rounded-2xl border px-4 py-3 text-left transition', consoleData.selectedSessionId === item.id ? 'border-emerald-200 bg-emerald-50/70' : 'border-slate-200 bg-[#fbfefd] hover:border-emerald-100 hover:bg-emerald-50/40')}>
+                <div className="text-sm font-medium text-slate-900">{item.title || item.id}</div>
+                <div className="mt-1 text-xs text-slate-500">{formatTime(item.updated_at || item.created_at)}</div>
+              </button>
+            ))}
+            {!activeAgentSessions.length && (
+              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-5 text-sm text-slate-500">
+                {activeAgentSessionOwner ? '当前智能体还没有会话记录。' : '先选择一个智能体并进入对话，这里才会展示它的历史记录。'}
+              </div>
+            )}
+          </div>
+        </Surface>
+
+        <Surface className="p-4">
+          <div className="mb-4">
+            <div className="text-sm font-semibold text-slate-900">{selectedActiveAgentSession?.title || '会话消息'}</div>
+            <div className="mt-1 text-xs text-slate-500">{selectedActiveAgentSession ? `${selectedActiveAgentSession.agent_id || 'default'} · ${formatTime(selectedActiveAgentSession.updated_at || selectedActiveAgentSession.created_at)}` : '从左侧选择一条会话后查看消息内容。'}</div>
+          </div>
+          <div className="max-h-[52vh] space-y-3 overflow-auto pr-1">
+            {consoleData.sessionMessagesLoading && (
+              <div className="rounded-2xl border border-slate-200 px-4 py-5 text-sm text-slate-500">正在读取会话消息…</div>
+            )}
+            {!consoleData.sessionMessagesLoading && !selectedActiveAgentSession && (
+              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-5 text-sm text-slate-500">请选择一条当前智能体的会话记录。</div>
+            )}
+            {!consoleData.sessionMessagesLoading && selectedActiveAgentSession && !consoleData.sessionMessages.length && (
+              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-5 text-sm text-slate-500">该会话暂无可展示的消息。</div>
+            )}
+            {!consoleData.sessionMessagesLoading && selectedActiveAgentSession && consoleData.sessionMessages.map(item => (
+              <div key={item.id} className="rounded-2xl border border-slate-200 bg-[#fbfefd] p-4">
+                <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
+                  <span>{item.role} · {item.agent || 'default'} · {item.model || '—'}</span>
+                  <span>{formatTime(item.created_at)}</span>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {item.parts.map((part, index) => (
+                    <div key={`${item.id}-${index}`} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-emerald-600">{part.type}</div>
+                      <div className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">{part.content || '—'}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Surface>
+      </div>
     </div>
   )
+
+  const modelCreateOwner = modelDraft.vendors.find(item => item.vendor_id === modelCreateVendorId) || selectedVendor
+  const selectedTemplateCard = cardTemplateGallery.find(item => item.template.template_id === cardTemplateId)?.previewCard || selectedTemplatePreviewCard
 
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,#f6fbfa_0%,#f3faf7_42%,#eef7f3_100%)] text-slate-800">
@@ -2053,16 +2193,355 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
           {view === 'tools' && renderTools()}
           {view === 'skills' && renderSkills()}
           {view === 'cards' && renderCards()}
-          {view === 'sessions' && renderSessions()}
-          {view === 'agent-chat' && (
-            <ChatWorkspace
-              agent={activeAgentForChat ? { agent_id: activeAgentForChat.agent_id, name: activeAgentForChat.name, description: activeAgentForChat.description, agent_variables: activeAgentForChat.agent_variables || [] } : null}
-              chat={chat}
-              modelReady={consoleData.modelConfig.has_api_key}
-              quickActions={profile.ui.quick_actions}
-              onBack={() => setView('agents')}
-            />
-          )}
+          {view === 'agent-chat' && renderAgentChat()}
+
+          <Modal open={vendorCreateDialogOpen} onClose={() => setVendorCreateDialogOpen(false)} title="新增厂商" description="先登记厂商，再补模型。" widthClass="max-w-2xl">
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="厂商 ID"><Input value={vendorCreateDraft.vendor_id} onChange={e => setVendorCreateDraft(prev => ({ ...prev, vendor_id: e.target.value }))} placeholder="例如 siliconflow" /></Field>
+              <Field label="显示名"><Input value={vendorCreateDraft.display_name} onChange={e => setVendorCreateDraft(prev => ({ ...prev, display_name: e.target.value }))} placeholder="例如 轨迹流动" /></Field>
+              <div className="md:col-span-2"><Field label="Base URL"><Input value={vendorCreateDraft.base_url} onChange={e => setVendorCreateDraft(prev => ({ ...prev, base_url: e.target.value }))} placeholder="https://api.example.com/v1" /></Field></div>
+            </div>
+            <div className="mt-5 flex items-center justify-between gap-3">
+              <Chip active={vendorCreateDraft.enabled} onClick={() => setVendorCreateDraft(prev => ({ ...prev, enabled: !prev.enabled }))}>默认启用</Chip>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setVendorCreateDialogOpen(false)} className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">取消</button>
+                <button onClick={() => void runAction(async () => { await addVendor(); setVendorCreateDialogOpen(false) }, '厂商已加入目录')} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600"><Plus size={14} />添加厂商</button>
+              </div>
+            </div>
+          </Modal>
+
+          <Modal open={modelCreateDialogOpen} onClose={() => setModelCreateDialogOpen(false)} title="新增模型" description={`归属厂商：${modelCreateOwner?.display_name || modelCreateOwner?.vendor_id || '未选择'}`} widthClass="max-w-2xl">
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="模型 ID"><Input value={modelCreateDraft.model_id} onChange={e => setModelCreateDraft(prev => ({ ...prev, model_id: e.target.value }))} placeholder="例如 gpt-4o-mini" /></Field>
+              <Field label="显示名"><Input value={modelCreateDraft.display_name} onChange={e => setModelCreateDraft(prev => ({ ...prev, display_name: e.target.value }))} placeholder="用于平台展示" /></Field>
+              <div className="md:col-span-2"><Field label="Chat Model"><Input value={modelCreateDraft.chat_model} onChange={e => setModelCreateDraft(prev => ({ ...prev, chat_model: e.target.value }))} placeholder="实际请求模型名" /></Field></div>
+            </div>
+            <div className="mt-5 flex items-center justify-between gap-3">
+              <Chip active={modelCreateDraft.enabled} onClick={() => setModelCreateDraft(prev => ({ ...prev, enabled: !prev.enabled }))}>默认启用</Chip>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setModelCreateDialogOpen(false)} className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">取消</button>
+                <button onClick={() => void runAction(async () => { await addVendorModel(modelCreateVendorId); setModelCreateDialogOpen(false) }, '模型已加入厂商目录')} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600"><Plus size={14} />添加模型</button>
+              </div>
+            </div>
+          </Modal>
+
+          <Modal open={modelEditorOpen && Boolean(selectedVendor)} onClose={() => setModelEditorOpen(false)} title={selectedVendor?.display_name || selectedVendor?.vendor_id || '模型编辑'} description="在弹窗里编辑厂商与模型，并直接测试模型连通性。" widthClass="max-w-6xl">
+            {selectedVendor && (
+              <div className="space-y-5">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label="API Key"><Input value={modelDraft.api_key} onChange={e => setModelDraft(prev => ({ ...prev, api_key: e.target.value }))} placeholder={consoleData.modelConfig.has_api_key ? '已配置，留空保持不变' : '输入 API Key'} /></Field>
+                  <Field label="Embedding Model"><Input value={modelDraft.embed_model} onChange={e => setModelDraft(prev => ({ ...prev, embed_model: e.target.value }))} /></Field>
+                  <Field label="默认厂商">
+                    <Select value={modelDraft.active_vendor} onChange={e => {
+                      const nextVendorId = e.target.value
+                      const nextVendor = modelDraft.vendors.find(item => item.vendor_id === nextVendorId)
+                      setModelDraft(prev => ({ ...prev, active_vendor: nextVendorId, active_model: nextVendor?.models[0]?.model_id || '' }))
+                      if (nextVendorId) focusVendor(nextVendorId)
+                    }}>
+                      <option value="">未选择</option>
+                      {modelDraft.vendors.map(item => <option key={item.vendor_id} value={item.vendor_id}>{item.display_name || item.vendor_id}</option>)}
+                    </Select>
+                  </Field>
+                  <Field label="默认模型">
+                    <Select value={modelDraft.active_model} onChange={e => setModelDraft(prev => ({ ...prev, active_model: e.target.value }))}>
+                      <option value="">未选择</option>
+                      {(modelDraft.vendors.find(item => item.vendor_id === modelDraft.active_vendor)?.models || []).map(item => <option key={item.model_id} value={item.model_id}>{item.display_name || item.model_id}</option>)}
+                    </Select>
+                  </Field>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap gap-2">
+                    <Chip active={selectedVendor.enabled} onClick={() => updateVendor(selectedVendor.vendor_id, { enabled: !selectedVendor.enabled })}>厂商启用</Chip>
+                    <Chip active={modelDraft.active_vendor === selectedVendor.vendor_id} onClick={() => setModelDraft(prev => ({ ...prev, active_vendor: selectedVendor.vendor_id, active_model: selectedVendor.models[0]?.model_id || '' }))}>设为默认厂商</Chip>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button onClick={() => openModelCreateDialog(selectedVendor.vendor_id)} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><Plus size={14} />添加模型</button>
+                    <button onClick={() => void runAction(saveModelCatalog, '模型目录已保存')} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600"><Save size={14} />保存</button>
+                    <button onClick={() => void runAction(deleteVendor, '厂商已删除')} className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 px-4 py-2 text-sm text-rose-600 transition hover:bg-rose-50"><Trash2 size={14} />删除厂商</button>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-3">
+                  <Field label="厂商 ID"><Input value={selectedVendor.vendor_id} disabled /></Field>
+                  <Field label="显示名"><Input value={selectedVendor.display_name} onChange={e => updateVendor(selectedVendor.vendor_id, { display_name: e.target.value })} /></Field>
+                  <Field label="Base URL"><Input value={selectedVendor.base_url} onChange={e => updateVendor(selectedVendor.vendor_id, { base_url: e.target.value })} /></Field>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {selectedVendor.models.map(model => (
+                    <div key={model.model_id} className="rounded-[24px] border border-slate-200 bg-[#fbfefd] p-4">
+                      <div className="mb-3 flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-slate-900">{model.display_name || model.model_id}</div>
+                          <div className="mt-1 truncate text-xs text-slate-500">{model.model_id}</div>
+                        </div>
+                        <button onClick={() => void runAction(async () => { await deleteVendorModel(model.model_id) }, '模型已删除')} className="inline-flex items-center gap-1 rounded-xl border border-rose-200 px-3 py-2 text-xs text-rose-600 transition hover:bg-rose-50"><Trash2 size={12} />删除</button>
+                      </div>
+                      <div className="grid gap-3">
+                        <Field label="显示名"><Input value={model.display_name} onChange={e => updateVendorModel(selectedVendor.vendor_id, model.model_id, { display_name: e.target.value })} /></Field>
+                        <Field label="Chat Model"><Input value={model.chat_model} onChange={e => updateVendorModel(selectedVendor.vendor_id, model.model_id, { chat_model: e.target.value })} /></Field>
+                      </div>
+                      <div className="mt-4 flex flex-wrap items-center gap-2">
+                        <Chip active={model.enabled} onClick={() => updateVendorModel(selectedVendor.vendor_id, model.model_id, { enabled: !model.enabled })}>模型启用</Chip>
+                        <Chip active={modelDraft.active_vendor === selectedVendor.vendor_id && modelDraft.active_model === model.model_id} onClick={() => setModelDraft(prev => ({ ...prev, active_vendor: selectedVendor.vendor_id, active_model: model.model_id }))}>设为默认模型</Chip>
+                        <button onClick={() => void runAction(async () => { await probeModelSelection(selectedVendor.vendor_id, model.model_id) }, '模型测试通过')} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">测试连接</button>
+                      </div>
+                    </div>
+                  ))}
+                  {!selectedVendor.models.length && <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">当前厂商还没有模型，先添加一个再测试。</div>}
+                </div>
+
+                {modelProbeResult && (
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
+                    <div className="text-sm font-semibold text-slate-900">模型测试通过</div>
+                    <div className="mt-1 text-xs text-slate-600">{modelProbeResult.vendor_id} / {modelProbeResult.model_id} · {modelProbeResult.chat_model} · {modelProbeResult.latency_ms} ms</div>
+                    <div className="mt-3 text-xs leading-6 text-slate-600">返回内容：{modelProbeResult.message || '—'}</div>
+                  </div>
+                )}
+              </div>
+            )}
+          </Modal>
+
+          <Modal open={toolEditorOpen} onClose={() => setToolEditorOpen(false)} title={toolName === NEW_KEY ? '新增协议工具' : toolForm.display_name || toolForm.tool_name || '工具编辑'} description="在弹窗中维护协议工具定义与启停状态。" widthClass="max-w-4xl">
+            <div className="space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm text-slate-500">工具信息优先来自同步；这里主要维护协议接入字段。</div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => void runAction(async () => { const saved = await consoleData.saveTool(toolFormToPayload(toolForm)); setToolName(saved.tool_name); setToolEditorOpen(false) }, '工具已保存')} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600"><Save size={14} />保存</button>
+                  <button onClick={() => void runAction(async () => {
+                    const targetName = toolForm.tool_name || selectedTool?.tool_name || ''
+                    await consoleData.deleteTool(targetName)
+                    setToolName(tools.find(item => item.tool_name !== targetName)?.tool_name || '')
+                    setToolEditorOpen(false)
+                  }, '工具已删除')} disabled={!toolForm.tool_name.trim() || toolName === NEW_KEY} className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 px-4 py-2 text-sm text-rose-600 transition hover:bg-rose-50 disabled:opacity-40"><Trash2 size={14} />删除</button>
+                </div>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field label="工具名"><Input value={toolForm.tool_name} onChange={e => setToolForm(prev => ({ ...prev, tool_name: e.target.value }))} /></Field>
+                <Field label="显示名"><Input value={toolForm.display_name} onChange={e => setToolForm(prev => ({ ...prev, display_name: e.target.value }))} /></Field>
+                <div className="md:col-span-2"><Field label="摘要"><Area rows={3} value={toolForm.summary} onChange={e => setToolForm(prev => ({ ...prev, summary: e.target.value }))} /></Field></div>
+                <Field label="接入类型"><Select value={toolForm.provider_type} onChange={e => setToolForm(prev => ({ ...prev, provider_type: e.target.value }))}><option value="protocol">protocol</option><option value="local">local</option><option value="mcp">mcp</option></Select></Field>
+                <Field label="作用域"><Select value={toolForm.scope} onChange={e => setToolForm(prev => ({ ...prev, scope: e.target.value }))}><option value="global">global</option><option value="skill">skill</option></Select></Field>
+                <div className="md:col-span-2"><Field label="来源 / Source Ref"><Input value={toolForm.source_ref} onChange={e => setToolForm(prev => ({ ...prev, source_ref: e.target.value }))} /></Field></div>
+                <div className="md:col-span-2"><Field label="协议参数 JSON"><Area rows={8} value={toolForm.transport_config_text} onChange={e => setToolForm(prev => ({ ...prev, transport_config_text: e.target.value }))} /></Field></div>
+                {toolForm.supports_card && <Field label="Card Type"><Input value={toolForm.card_type} onChange={e => setToolForm(prev => ({ ...prev, card_type: e.target.value }))} /></Field>}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Chip active={toolForm.enabled} onClick={() => setToolForm(prev => ({ ...prev, enabled: !prev.enabled }))}>启用</Chip>
+                <Chip active={toolForm.supports_card} onClick={() => setToolForm(prev => ({ ...prev, supports_card: !prev.supports_card }))}>卡片支持</Chip>
+              </div>
+              {selectedTool && (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="rounded-2xl border border-slate-200 bg-[#fbfefd] p-4">
+                    <div className="mb-2 text-sm font-medium text-slate-900">输入 schema</div>
+                    <pre className="overflow-auto whitespace-pre-wrap text-xs leading-6 text-slate-600">{formatJson(selectedTool.input_schema || {})}</pre>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-[#fbfefd] p-4">
+                    <div className="mb-2 text-sm font-medium text-slate-900">输出 schema</div>
+                    <pre className="overflow-auto whitespace-pre-wrap text-xs leading-6 text-slate-600">{formatJson(selectedTool.output_schema || {})}</pre>
+                  </div>
+                </div>
+              )}
+            </div>
+          </Modal>
+
+          <Modal open={mcpServerDialogOpen} onClose={() => setMcpServerDialogOpen(false)} title={mcpServerName === NEW_KEY ? '新增 MCP 服务' : mcpServerDraft.name || 'MCP 接入'} description="填写命令或 URL，先测试，再接入平台。" widthClass="max-w-4xl">
+            <div className="space-y-5">
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field label="MCP 启用"><Select value={mcpMetaDraft.enabled ? 'true' : 'false'} onChange={e => setMcpMetaDraft(prev => ({ ...prev, enabled: e.target.value === 'true' }))}><option value="true">启用</option><option value="false">关闭</option></Select></Field>
+                <Field label="工具超时秒数"><Input type="number" value={String(mcpMetaDraft.tool_timeout_seconds)} onChange={e => setMcpMetaDraft(prev => ({ ...prev, tool_timeout_seconds: Number(e.target.value || 0) }))} /></Field>
+                <Field label="服务名"><Input value={mcpServerDraft.name} onChange={e => setMcpServerDraft(prev => ({ ...prev, name: e.target.value }))} /></Field>
+                <Field label="Transport"><Select value={mcpServerDraft.transport} onChange={e => setMcpServerDraft(prev => ({ ...prev, transport: e.target.value }))}><option value="stdio">stdio</option><option value="sse">sse</option><option value="http">http</option><option value="ws">websocket</option></Select></Field>
+                {mcpServerDraft.transport === 'stdio' ? (
+                  <>
+                    <Field label="Command"><Input value={mcpServerDraft.command} onChange={e => setMcpServerDraft(prev => ({ ...prev, command: e.target.value }))} /></Field>
+                    <Field label="CWD"><Input value={mcpServerDraft.cwd} onChange={e => setMcpServerDraft(prev => ({ ...prev, cwd: e.target.value }))} /></Field>
+                  </>
+                ) : (
+                  <div className="md:col-span-2"><Field label="URL"><Input value={mcpServerDraft.url} onChange={e => setMcpServerDraft(prev => ({ ...prev, url: e.target.value }))} placeholder="例如 http://127.0.0.1:9100/mcp 或 /sse" /></Field></div>
+                )}
+                <Field label="Scope"><Select value={mcpServerDraft.scope} onChange={e => setMcpServerDraft(prev => ({ ...prev, scope: e.target.value }))}><option value="global">global</option><option value="skill">skill</option></Select></Field>
+                <Field label="启用状态"><Select value={mcpServerDraft.enabled ? 'true' : 'false'} onChange={e => setMcpServerDraft(prev => ({ ...prev, enabled: e.target.value === 'true' }))}><option value="true">启用</option><option value="false">关闭</option></Select></Field>
+              </div>
+              <details className="rounded-2xl border border-slate-200 bg-[#fbfefd] p-4">
+                <summary className="cursor-pointer text-sm font-medium text-slate-700">高级选项</summary>
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <Field label="Tool Name Prefix"><Input value={mcpServerDraft.tool_name_prefix} onChange={e => setMcpServerDraft(prev => ({ ...prev, tool_name_prefix: e.target.value }))} /></Field>
+                  <Field label="Args"><Area rows={5} value={mcpServerDraft.args_text} onChange={e => setMcpServerDraft(prev => ({ ...prev, args_text: e.target.value }))} /></Field>
+                  <Field label="Include Tools"><Area rows={5} value={mcpServerDraft.include_tools_text} onChange={e => setMcpServerDraft(prev => ({ ...prev, include_tools_text: e.target.value }))} /></Field>
+                  <Field label="Exclude Tools"><Area rows={5} value={mcpServerDraft.exclude_tools_text} onChange={e => setMcpServerDraft(prev => ({ ...prev, exclude_tools_text: e.target.value }))} /></Field>
+                </div>
+              </details>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm text-slate-500">保存服务时会同时带上当前 MCP 全局开关与超时设置。</div>
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={() => void runAction(async () => { await probeMcpServer() }, 'MCP 测试通过')} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><Sparkles size={14} />测试连接</button>
+                  <button onClick={() => void runAction(async () => { await saveMcpServer(); setMcpServerDialogOpen(false) }, 'MCP 服务配置已保存')} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600"><Save size={14} />测试并接入</button>
+                  <button onClick={() => void runAction(async () => { await deleteMcpServer(); setMcpServerDialogOpen(false) }, 'MCP 服务已删除')} disabled={!mcpServerName || mcpServerName === NEW_KEY} className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 px-4 py-2 text-sm text-rose-600 transition hover:bg-rose-50 disabled:opacity-40"><Trash2 size={14} />删除</button>
+                </div>
+              </div>
+              {mcpProbeResult && (
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">测试通过</div>
+                      <div className="mt-1 text-xs text-slate-600">{mcpProbeResult.server_name} · {mcpProbeResult.transport} · 发现 {mcpProbeResult.count} 个工具</div>
+                    </div>
+                    <div className="text-xs text-slate-500">{mcpProbeResult.server_info?.name || 'MCP Server'}</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </Modal>
+
+          <Modal open={skillEditorOpen} onClose={() => setSkillEditorOpen(false)} title={skillName === NEW_KEY ? '新建技能' : skillForm.display_name || skillForm.skill_name || '技能配置'} description="在弹窗中维护技能摘要、正文与绑定工具。" widthClass="max-w-4xl">
+            <div className="space-y-5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm text-slate-500">技能摘要会直接注入系统提示，正文按需加载。</div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => void runAction(async () => { const saved = await consoleData.saveSkill(skillFormToPayload(skillForm)); setSkillName(saved.skill_name); setSkillEditorOpen(false) }, '技能已保存')} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600"><Save size={14} />保存</button>
+                  <button onClick={() => void runAction(async () => {
+                    const targetName = skillForm.skill_name || selectedSkill?.skill_name || ''
+                    await consoleData.deleteSkill(targetName)
+                    setSkillName(skills.find(item => item.skill_name !== targetName)?.skill_name || '')
+                    setSkillEditorOpen(false)
+                  }, '技能已删除')} disabled={!skillForm.skill_name.trim() || skillName === NEW_KEY} className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 px-4 py-2 text-sm text-rose-600 transition hover:bg-rose-50 disabled:opacity-40"><Trash2 size={14} />删除</button>
+                </div>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field label="技能名"><Input value={skillForm.skill_name} onChange={e => setSkillForm(prev => ({ ...prev, skill_name: e.target.value }))} /></Field>
+                <Field label="启用状态"><Select value={skillForm.enabled ? 'true' : 'false'} onChange={e => setSkillForm(prev => ({ ...prev, enabled: e.target.value === 'true' }))}><option value="true">启用</option><option value="false">关闭</option></Select></Field>
+                <div className="md:col-span-2"><Field label="摘要"><Area rows={3} value={skillForm.summary} onChange={e => setSkillForm(prev => ({ ...prev, summary: e.target.value }))} /></Field></div>
+                <div className="md:col-span-2"><Field label="正文 Markdown"><Area rows={12} value={skillForm.document_md} onChange={e => setSkillForm(prev => ({ ...prev, document_md: e.target.value }))} /></Field></div>
+              </div>
+              <div>
+                <div className="mb-3 text-sm font-medium text-slate-900">绑定工具</div>
+                <div className="flex flex-wrap gap-2">
+                  {tools.map(item => (
+                    <Chip key={item.tool_name} active={skillForm.tool_names.includes(item.tool_name)} onClick={() => setSkillForm(prev => ({ ...prev, tool_names: toggleName(prev.tool_names, item.tool_name) }))}>
+                      {item.display_name || item.tool_name}
+                    </Chip>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </Modal>
+
+          <Modal open={cardTemplateDialogOpen && Boolean(cardTemplateId)} onClose={() => setCardTemplateDialogOpen(false)} title={cardTemplateId === NEW_KEY ? '新建卡片模板' : selectedCardTemplate?.display_name || selectedCardTemplate?.template_id || '卡片模板'} description={cardTemplateId === NEW_KEY ? '在弹窗中创建模板并实时预览。' : selectedCardTemplate?.summary || '卡片模板预览与编辑'} widthClass="max-w-5xl">
+            <div className="space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm text-slate-500">模板描述渲染结构、数据 Schema 和动作协议，保存后可直接给工具复用。</div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => void runAction(async () => {
+                    const saved = await consoleData.saveCardTemplate(cardTemplateFormToPayload(cardTemplateForm))
+                    setCardTemplateId(saved.template_id)
+                  }, '卡片模板已保存')} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600"><Save size={14} />保存模板</button>
+                  <button onClick={() => void runAction(async () => {
+                    const targetId = cardTemplateForm.template_id || selectedCardTemplate?.template_id || ''
+                    await consoleData.deleteCardTemplate(targetId)
+                    setCardTemplateId('')
+                    setCardTemplateDialogOpen(false)
+                  }, '卡片模板已删除')} disabled={!cardTemplateForm.template_id.trim() || cardTemplateId === NEW_KEY} className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 px-4 py-2 text-sm text-rose-600 transition hover:bg-rose-50 disabled:opacity-40"><Trash2 size={14} />删除</button>
+                </div>
+              </div>
+
+              <div className="grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label="模板 ID"><Input value={cardTemplateForm.template_id} onChange={e => setCardTemplateForm(prev => ({ ...prev, template_id: e.target.value }))} /></Field>
+                  <Field label="启用状态">
+                    <Select value={cardTemplateForm.enabled ? 'true' : 'false'} onChange={e => setCardTemplateForm(prev => ({ ...prev, enabled: e.target.value === 'true' }))}>
+                      <option value="true">启用</option>
+                      <option value="false">关闭</option>
+                    </Select>
+                  </Field>
+                  <Field label="展示名"><Input value={cardTemplateForm.display_name} onChange={e => setCardTemplateForm(prev => ({ ...prev, display_name: e.target.value }))} /></Field>
+                  <Field label="模板类型"><Input value={cardTemplateForm.template_type} onChange={e => setCardTemplateForm(prev => ({ ...prev, template_type: e.target.value }))} /></Field>
+                  <div className="md:col-span-2"><Field label="摘要"><Area rows={3} value={cardTemplateForm.summary} onChange={e => setCardTemplateForm(prev => ({ ...prev, summary: e.target.value }))} /></Field></div>
+                  <div className="md:col-span-2"><Field label="Renderer Key"><Input value={cardTemplateForm.renderer_key} onChange={e => setCardTemplateForm(prev => ({ ...prev, renderer_key: e.target.value }))} /></Field></div>
+                  <Field label="Data Schema"><Area rows={10} value={cardTemplateForm.data_schema_text} onChange={e => setCardTemplateForm(prev => ({ ...prev, data_schema_text: e.target.value }))} /></Field>
+                  <Field label="UI Schema"><Area rows={10} value={cardTemplateForm.ui_schema_text} onChange={e => setCardTemplateForm(prev => ({ ...prev, ui_schema_text: e.target.value }))} /></Field>
+                  <Field label="动作 Schema"><Area rows={10} value={cardTemplateForm.action_schema_text} onChange={e => setCardTemplateForm(prev => ({ ...prev, action_schema_text: e.target.value }))} /></Field>
+                  <Field label="样例 Payload"><Area rows={10} value={cardTemplateForm.sample_payload_text} onChange={e => setCardTemplateForm(prev => ({ ...prev, sample_payload_text: e.target.value }))} /></Field>
+                  <div className="md:col-span-2"><Field label="附加信息"><Area rows={8} value={cardTemplateForm.metadata_text} onChange={e => setCardTemplateForm(prev => ({ ...prev, metadata_text: e.target.value }))} /></Field></div>
+                </div>
+
+                <div className="space-y-4">
+                  <Surface className="p-5">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="text-sm font-medium text-slate-900">模板预览</div>
+                      <div className="text-xs text-slate-500">实时跟随表单内容</div>
+                    </div>
+                    <CardRenderer card={selectedTemplateCard} onInspectPath={setCardInspectPath} />
+                  </Surface>
+                  <Surface className="p-5">
+                    <div className="mb-3 text-sm font-medium text-slate-900">样例 JSON</div>
+                    {renderHighlightedJson(selectedTemplatePreviewPayload, cardInspectPath)}
+                  </Surface>
+                </div>
+              </div>
+            </div>
+          </Modal>
+
+          <Modal open={cardBindingDialogOpen && Boolean(selectedCard)} onClose={() => setCardBindingDialogOpen(false)} title={selectedCard?.card_type || '卡片协议'} description={selectedCard ? `${selectedCard.source_kind} · ${selectedCard.source_name}` : '卡片协议详情'} widthClass="max-w-3xl">
+            {selectedCard && (
+              <div className="space-y-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm text-slate-500">通过工具或技能的输出协议映射到卡片模板，可直接在这里修改并保存。</div>
+                  {selectedCard.source_kind === 'tool' ? (
+                    <button onClick={() => { setCardBindingDialogOpen(false); openToolEditor(selectedCard.source_name); setView('tools') }} className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">去工具配置</button>
+                  ) : (
+                    <button onClick={() => { setCardBindingDialogOpen(false); openSkillEditor(selectedCard.source_name); setView('skills') }} className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">去技能配置</button>
+                  )}
+                </div>
+                {cardTemplates.length > 0 && (
+                  <div className="rounded-2xl border border-slate-200 bg-[#f8fcfb] px-4 py-3 text-sm text-slate-500">
+                    可用模板：{cardTemplates.map(item => item.display_name || item.template_id).join('、')}
+                  </div>
+                )}
+                {selectedCard.source_kind === 'tool' ? (
+                  <div className="grid gap-4">
+                    <Field label="摘要"><Area rows={3} value={cardToolDraft.summary} onChange={e => setCardToolDraft(prev => ({ ...prev, summary: e.target.value }))} /></Field>
+                    <Field label="Card Type"><Input value={cardToolDraft.card_type} onChange={e => setCardToolDraft(prev => ({ ...prev, card_type: e.target.value }))} /></Field>
+                    <Field label="卡片绑定 JSON"><Area rows={14} value={cardToolDraft.card_binding_text} onChange={e => setCardToolDraft(prev => ({ ...prev, card_binding_text: e.target.value }))} /></Field>
+                    <div>
+                      <button onClick={() => void runAction(async () => {
+                        const base = tools.find(item => item.tool_name === selectedCard.source_name)
+                        if (!base) throw new Error('来源工具不存在')
+                        const saved = await consoleData.saveTool({
+                          ...base,
+                          summary: cardToolDraft.summary.trim(),
+                          supports_card: true,
+                          card_type: cardToolDraft.card_type.trim(),
+                          card_binding: parseJsonText(cardToolDraft.card_binding_text, {}, '卡片绑定'),
+                        })
+                        setCardId(`tool:${saved.tool_name}:${saved.card_type || 'bound'}`)
+                        setCardBindingDialogOpen(false)
+                      }, '卡片协议已保存')} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600"><Save size={14} />保存卡片配置</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid gap-4">
+                    <Field label="摘要"><Area rows={3} value={cardSkillDraft.summary} onChange={e => setCardSkillDraft(prev => ({ ...prev, summary: e.target.value }))} /></Field>
+                    <Field label="卡片类型"><Area rows={10} value={cardSkillDraft.card_types_text} onChange={e => setCardSkillDraft(prev => ({ ...prev, card_types_text: e.target.value }))} /></Field>
+                    <div>
+                      <button onClick={() => void runAction(async () => {
+                        const base = skills.find(item => item.skill_name === selectedCard.source_name)
+                        if (!base) throw new Error('来源技能不存在')
+                        const saved = await consoleData.saveSkill({
+                          ...base,
+                          summary: cardSkillDraft.summary.trim(),
+                          card_types: cardSkillDraft.card_types_text.split(/[\n,]/g).map(item => item.trim()).filter(Boolean),
+                        })
+                        setCardId(`skill:${saved.skill_name}:${saved.card_types[0] || selectedCard.card_type}`)
+                        setCardBindingDialogOpen(false)
+                      }, '卡片协议已保存')} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600"><Save size={14} />保存卡片配置</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </Modal>
         </main>
       </div>
     </div>

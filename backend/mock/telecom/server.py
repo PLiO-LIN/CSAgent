@@ -304,6 +304,10 @@ mcp = _CompatMCP(
 )
 
 
+async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+    await mcp.asgi_app(scope, receive, send)
+
+
 def _icon_payload(label: str, color: str) -> dict[str, Any]:
     svg = (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
@@ -618,7 +622,7 @@ def main():
     else:
         import uvicorn
         print(f"🚀 电信客服模拟 MCP 服务器启动: SSE=http://127.0.0.1:{args.port}/sse  HTTP=http://127.0.0.1:{args.port}/mcp")
-        uvicorn.run(mcp.asgi_app, host="127.0.0.1", port=args.port, log_level="info")
+        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="info", interface="asgi3")
 
 
 if __name__ == "__main__":
