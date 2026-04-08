@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
-import { Bot, Brain, ChevronRight, Cpu, LayoutDashboard, Plus, RefreshCw, Save, SendHorizontal, Sparkles, Trash2, Wrench } from 'lucide-react'
+import { Bot, Brain, ChevronRight, Cpu, LayoutDashboard, Plus, RefreshCw, Save, SendHorizontal, Sparkles, Trash2, Upload, Wrench } from 'lucide-react'
 import ChatWorkspace from './ChatWorkspace'
 import CardRenderer from './CardRenderer'
-import { MODEL_VENDOR_TYPE_OPTIONS, getModelVendorPreset, usePlatformConsole, type McpProbeResult, type ModelCatalogModel, type ModelCatalogVendor, type ModelProbeResult, type UsageTrendPoint, type VendorUsageStats } from '../hooks/usePlatformConsole'
+import { MODEL_VENDOR_TYPE_OPTIONS, getModelVendorPreset, usePlatformConsole, type AgentApiDocsRecord, type AgentApiKeyRecord, type McpProbeResult, type ModelCatalogModel, type ModelCatalogVendor, type ModelProbeResult, type UsageTrendPoint, type VendorUsageStats } from '../hooks/usePlatformConsole'
 import { type UseChatController } from '../hooks/useChat'
 import { type FrameworkInfo, type FrameworkProfile } from '../hooks/useFrameworkProfile'
 import { resolveChatActionInput } from '../lib/chatDisplay'
@@ -698,6 +698,13 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
   const [modelProbeResult, setModelProbeResult] = useState<ModelProbeResult | null>(null)
   const [cardInspectPath, setCardInspectPath] = useState('')
   const [cardMetaDrawerOpen, setCardMetaDrawerOpen] = useState(true)
+  const [agentApiDialogOpen, setAgentApiDialogOpen] = useState(false)
+  const [agentApiOwnerId, setAgentApiOwnerId] = useState('')
+  const [agentApiDocs, setAgentApiDocs] = useState<AgentApiDocsRecord | null>(null)
+  const [agentApiKeys, setAgentApiKeys] = useState<AgentApiKeyRecord[]>([])
+  const [agentApiKeyName, setAgentApiKeyName] = useState('')
+  const [agentApiCreatedKey, setAgentApiCreatedKey] = useState('')
+  const [agentApiLoading, setAgentApiLoading] = useState(false)
   const [vendorCreateDialogOpen, setVendorCreateDialogOpen] = useState(false)
   const [modelCreateDialogOpen, setModelCreateDialogOpen] = useState(false)
   const [modelEditorOpen, setModelEditorOpen] = useState(false)
@@ -1324,6 +1331,72 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
   const openAgentEditor = (targetAgentId: string) => {
     setAgentId(targetAgentId)
     setAgentEditorOpen(true)
+  }
+
+  const openUrlInNewTab = (targetUrl: string) => {
+    const url = String(targetUrl || '').trim()
+    if (!url) return
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  const copyText = async (value: string, success: string) => {
+    const text = String(value || '').trim()
+    if (!text) return
+    await navigator.clipboard.writeText(text)
+    setBanner(success)
+  }
+
+  const loadAgentApiData = async (targetAgentId: string) => {
+    const id = String(targetAgentId || '').trim()
+    if (!id) throw new Error('智能体 ID 不能为空')
+    setAgentApiLoading(true)
+    try {
+      const [docs, keys] = await Promise.all([
+        consoleData.getAgentApiDocs(id),
+        consoleData.listAgentApiKeys(id),
+      ])
+      setAgentApiOwnerId(id)
+      setAgentApiDocs(docs)
+      setAgentApiKeys(keys)
+      return { docs, keys }
+    } finally {
+      setAgentApiLoading(false)
+    }
+  }
+
+  const openAgentApiDialog = async (targetAgentId: string) => {
+    const id = String(targetAgentId || '').trim()
+    if (!id) return
+    setActionError('')
+    setBanner('')
+    setAgentApiCreatedKey('')
+    setAgentApiKeyName('')
+    setAgentApiOwnerId(id)
+    setAgentApiDialogOpen(true)
+    try {
+      await loadAgentApiData(id)
+    } catch (err: any) {
+      setActionError(err?.message || '读取智能体 API 信息失败')
+    }
+  }
+
+  const createAgentApiKey = async () => {
+    const id = String(agentApiOwnerId || '').trim()
+    if (!id) throw new Error('请先选择智能体')
+    const result = await consoleData.createAgentApiKey(id, agentApiKeyName)
+    setAgentApiCreatedKey(result.key || '')
+    setAgentApiKeyName('')
+    const nextKeys = await consoleData.listAgentApiKeys(id)
+    setAgentApiKeys(nextKeys)
+    setBanner('智能体 API Key 已创建，请立即复制保存')
+  }
+
+  const removeAgentApiKey = async (keyId: string) => {
+    const id = String(agentApiOwnerId || '').trim()
+    if (!id) throw new Error('请先选择智能体')
+    await consoleData.deleteAgentApiKey(id, keyId)
+    setAgentApiKeys(prev => prev.filter(item => item.key_id !== keyId))
+    setBanner('智能体 API Key 已删除')
   }
 
   const openToolEditor = (targetToolName: string) => {
@@ -2041,6 +2114,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
 
                   <div className="mt-5 flex flex-wrap items-center gap-2">
                     <button onClick={() => openAgentEditor(item.agent_id)} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">编辑</button>
+                    {item.published && <button onClick={() => void openAgentApiDialog(item.agent_id)} className="inline-flex items-center gap-2 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm text-sky-700 transition hover:border-sky-300 hover:text-sky-800">API 文档</button>}
                     <button onClick={() => openAgentChat(item.agent_id)} className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm text-white transition hover:bg-slate-800"><SendHorizontal size={14} />对话</button>
                   </div>
                 </div>
@@ -2239,14 +2313,37 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
   const renderCards = () => (
     <div className="space-y-5">
       <Surface className="p-4">
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Chip active={cardsMode === 'templates'} onClick={() => setCardsMode('templates')}>模板库</Chip>
           <Chip active={cardsMode === 'bindings'} onClick={() => setCardsMode('bindings')}>绑定协议</Chip>
+          <div className="ml-auto flex flex-wrap gap-2">
+            <input id="card-pack-file-input" type="file" accept=".json" className="hidden" onChange={e => {
+              const file = e.target.files?.[0]
+              if (!file) return
+              const reader = new FileReader()
+              reader.onload = () => {
+                try {
+                  const pack = JSON.parse(reader.result as string)
+                  void runAction(async () => {
+                    const result = await consoleData.importCardPack(pack)
+                    if (result.errors?.length) console.warn('卡片包导入警告:', result.errors)
+                  }, `卡片包已导入：${(pack as any).display_name || (pack as any).pack_id || file.name}`)
+                } catch { void runAction(() => Promise.reject(new Error('JSON 解析失败，请检查文件格式')), '') }
+              }
+              reader.readAsText(file, 'utf-8')
+              e.target.value = ''
+            }} />
+            <button onClick={() => document.getElementById('card-pack-file-input')?.click()} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><Upload size={14} />导入卡片包</button>
+            <button onClick={() => void runAction(async () => {
+              const results = await consoleData.scanCardPacks()
+              if (!results.length) throw new Error('card_packs/ 目录不存在或无 JSON 文件')
+            }, '卡片包目录已扫描')} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><RefreshCw size={14} />扫描目录</button>
+          </div>
         </div>
       </Surface>
 
       {cardsMode === 'templates' ? (
-        <div className="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
+        <div className="grid gap-5 xl:grid-cols-[280px_320px_minmax(0,1fr)]">
           <ResourceList
             title="卡片集"
             items={cardCollections}
@@ -2259,176 +2356,99 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
             newLabel="新建卡片集"
           />
 
-          <div className="space-y-5">
-            <Surface className="p-6">
-              <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="text-lg font-semibold text-slate-900">{selectedCardCollection?.display_name || '卡片模板'}</div>
-                  <div className="mt-1 text-sm text-slate-500">{selectedCardCollection?.summary || '按卡片集管理模板，便于归属划分与复用。'}</div>
-                  <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-500">
-                    <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">{selectedCardCollection?.collection_id || '未选择卡片集'}</span>
-                    <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">{cardTemplateCountByCollection.get(selectedCardCollection?.collection_id || '') || 0} 个模板</span>
-                    {selectedCardCollection && !selectedCardCollection.enabled && <span className="rounded-full bg-slate-200 px-2.5 py-1 text-[11px] text-slate-600">已停用</span>}
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button onClick={() => openCardCollectionDialog(selectedCardCollection?.collection_id || NEW_KEY)} disabled={!selectedCardCollection} className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600 disabled:opacity-40">编辑卡片集</button>
-                  <button onClick={() => openCardTemplateDialog(NEW_KEY)} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><Plus size={14} />新增模板</button>
-                </div>
+          <Surface className="p-4">
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">模板列表</div>
+                <div className="mt-1 text-xs text-slate-500">{selectedCardCollection?.display_name || '未选择卡片集'} · {cardTemplateCountByCollection.get(selectedCardCollection?.collection_id || '') || 0} 个模板</div>
               </div>
-              {filteredCardTemplateGallery.length ? (
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  {filteredCardTemplateGallery.map(item => {
-                    const active = cardTemplateId === item.template.template_id
-                    const collection = cardCollections.find(cardCollection => cardCollection.collection_id === item.template.collection_id) || null
-                    return (
-                      <button key={item.template.template_id} onClick={() => openCardTemplateDialog(item.template.template_id)} className={cx('overflow-hidden rounded-[26px] border p-3 text-left transition', active ? 'border-emerald-300 bg-emerald-50/40' : 'border-slate-200 bg-[#fbfefd] hover:border-emerald-200 hover:bg-emerald-50/30')}>
-                        <div className="mb-2 flex items-center justify-between gap-3 px-2">
-                          <div>
-                            <div className="text-sm font-semibold text-slate-900">{item.template.display_name || item.template.template_id}</div>
-                            <div className="mt-1 text-xs text-slate-500">{item.template.template_type} · {collection?.display_name || item.template.collection_id || 'default'}</div>
-                          </div>
-                        </div>
-                        <CardRenderer card={item.previewCard} />
-                      </button>
-                    )
-                  })}
-                </div>
-              ) : (
-                <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">当前卡片集还没有模板，点击右上角新建。</div>
-              )}
-            </Surface>
-
-            {cardTemplateId && !cardTemplateDialogOpen && (
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-                <div className="space-y-5">
-                  <Surface className="p-6">
-                    <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <div className="text-lg font-semibold text-slate-900">{cardTemplateId === NEW_KEY ? '新建卡片模板' : cardTemplateForm.display_name || cardTemplateForm.template_id || '卡片模板'}</div>
-                        <div className="mt-1 text-sm text-slate-500">模板定义渲染结构、数据 Schema 和动作合约，保存后可被工具复用。</div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => void runAction(async () => {
-                          const saved = await consoleData.saveCardTemplate(cardTemplateFormToPayload(cardTemplateForm))
-                          setCardTemplateId(saved.template_id)
-                        }, '卡片模板已保存')} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600"><Save size={14} />保存模板</button>
-                        <button onClick={() => void runAction(async () => {
-                          const targetId = cardTemplateForm.template_id || selectedCardTemplate?.template_id || ''
-                          await consoleData.deleteCardTemplate(targetId)
-                          setCardTemplateId('')
-                        }, '卡片模板已删除')} disabled={!cardTemplateForm.template_id.trim() || cardTemplateId === NEW_KEY} className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 px-4 py-2 text-sm text-rose-600 transition hover:bg-rose-50 disabled:opacity-40"><Trash2 size={14} />删除</button>
-                      </div>
-                    </div>
-
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <Field label="模板 ID"><Input value={cardTemplateForm.template_id} onChange={e => setCardTemplateForm(prev => ({ ...prev, template_id: e.target.value }))} /></Field>
-                      <Field label="启用">
-                        <Select value={cardTemplateForm.enabled ? 'true' : 'false'} onChange={e => setCardTemplateForm(prev => ({ ...prev, enabled: e.target.value === 'true' }))}>
-                          <option value="true">启用</option>
-                          <option value="false">关闭</option>
-                        </Select>
-                      </Field>
-                      <Field label="所属卡片集">
-                        <Select value={cardTemplateForm.collection_id} onChange={e => setCardTemplateForm(prev => ({ ...prev, collection_id: e.target.value }))}>
-                          {cardCollections.map(item => <option key={item.collection_id} value={item.collection_id}>{item.display_name || item.collection_id}</option>)}
-                        </Select>
-                      </Field>
-                      <Field label="显示名"><Input value={cardTemplateForm.display_name} onChange={e => setCardTemplateForm(prev => ({ ...prev, display_name: e.target.value }))} /></Field>
-                      <Field label="模板类型"><Input value={cardTemplateForm.template_type} onChange={e => setCardTemplateForm(prev => ({ ...prev, template_type: e.target.value }))} /></Field>
-                      <div className="md:col-span-2"><Field label="摘要"><Area rows={3} value={cardTemplateForm.summary} onChange={e => setCardTemplateForm(prev => ({ ...prev, summary: e.target.value }))} /></Field></div>
-                      <div className="md:col-span-2"><Field label="渲染器 Key"><Input value={cardTemplateForm.renderer_key} onChange={e => setCardTemplateForm(prev => ({ ...prev, renderer_key: e.target.value }))} /></Field></div>
-                      <Field label="数据 Schema"><Area rows={10} value={cardTemplateForm.data_schema_text} onChange={e => setCardTemplateForm(prev => ({ ...prev, data_schema_text: e.target.value }))} /></Field>
-                      <Field label="UI 模板"><Area rows={10} value={cardTemplateForm.ui_schema_text} onChange={e => setCardTemplateForm(prev => ({ ...prev, ui_schema_text: e.target.value }))} /></Field>
-                      <Field label="动作 Schema"><Area rows={10} value={cardTemplateForm.action_schema_text} onChange={e => setCardTemplateForm(prev => ({ ...prev, action_schema_text: e.target.value }))} /></Field>
-                      <Field label="样例 Payload"><Area rows={10} value={cardTemplateForm.sample_payload_text} onChange={e => setCardTemplateForm(prev => ({ ...prev, sample_payload_text: e.target.value }))} /></Field>
-                    </div>
-                  </Surface>
-
-                  <Surface className="p-6">
-                    <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <div className="text-lg font-semibold text-slate-900">卡片调试</div>
-                        <div className="mt-1 text-sm text-slate-500">使用样例 JSON 与绑定配置，验证最终卡片渲染结果。</div>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <button onClick={() => setCardPlaygroundDraft(prev => ({ ...prev, source_payload_text: cardTemplateForm.sample_payload_text || '{}' }))} className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">载入样例</button>
-                        <button onClick={() => setCardPlaygroundDraft(prev => ({ ...prev, binding_text: createDefaultCardBinding(cardTemplateForm.template_id) }))} className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">重置绑定</button>
-                        <button onClick={() => void runAction(async () => {
-                          const template = cardTemplateFormToPayload(cardTemplateForm)
-                          const sourcePayload = parseJsonText(cardPlaygroundDraft.source_payload_text, {}, '来源 Payload')
-                          const binding = parseJsonText(cardPlaygroundDraft.binding_text, {}, '绑定配置')
-                          const result = await consoleData.previewCard({ template, source_payload: sourcePayload, binding })
-                          setCardPreviewCard(result.card || null)
-                          setCardPreviewDebug(result.debug || {})
-                          setCardPreviewActionText('')
-                        }, '卡片预览已更新')} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600"><Sparkles size={14} />生成预览</button>
-                      </div>
-                    </div>
-
-                    <div className="grid gap-4">
-                      <Field label="来源 Payload JSON"><Area rows={16} value={cardPlaygroundDraft.source_payload_text} onChange={e => setCardPlaygroundDraft(prev => ({ ...prev, source_payload_text: e.target.value }))} /></Field>
-                      <Field label="绑定 JSON"><Area rows={16} value={cardPlaygroundDraft.binding_text} onChange={e => setCardPlaygroundDraft(prev => ({ ...prev, binding_text: e.target.value }))} /></Field>
-                    </div>
-                  </Surface>
-                </div>
-
-                <div className={cx('grid gap-5 xl:items-start', cardMetaDrawerOpen ? 'xl:grid-cols-[minmax(0,1fr)_360px]' : 'xl:grid-cols-[minmax(0,1fr)]')}>
-                  <div className="space-y-5">
-                    <Surface className="p-6">
-                      <div className="mb-4 flex items-center justify-between gap-3">
-                        <div>
-                          <div className="text-lg font-semibold text-slate-900">模板预览</div>
-                          <div className="mt-1 text-sm text-slate-500">悬停字段时，样例 JSON 会同步高亮；元数据侧栏默认展示在右侧。</div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <button onClick={() => setCardMetaDrawerOpen(prev => !prev)} className="rounded-2xl border border-slate-200 px-3 py-2 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">{cardMetaDrawerOpen ? '隐藏元数据面板' : '显示元数据面板'}</button>
-                          <div className="text-xs text-slate-500">{cardInspectPath || '尚未悬停字段'}</div>
-                        </div>
-                      </div>
-                      <CardRenderer card={selectedTemplatePreviewCard} onInspectPath={setCardInspectPath} />
-                      <div className="mt-4 space-y-2">
-                        <div className="text-sm font-medium text-slate-900">样例 JSON</div>
-                        {renderHighlightedJson(selectedTemplatePreviewPayload, cardInspectPath)}
-                      </div>
-                    </Surface>
-
-                    <Surface className="p-6">
-                      <div className="mb-4 flex items-center justify-between gap-3">
-                        <div>
-                          <div className="text-lg font-semibold text-slate-900">预览结果</div>
-                          <div className="mt-1 text-sm text-slate-500">卡片结果保留在当前区域，JSON / 调试信息放到右侧元数据栏。</div>
-                        </div>
-                      </div>
-                      {cardPreviewCard ? (
-                        <CardRenderer card={cardPreviewCard} onAction={input => setCardPreviewActionText(formatJson(resolveChatActionInput(input)))} />
-                      ) : (
-                        <div className="rounded-2xl border border-dashed border-slate-200 bg-[#fbfefd] px-4 py-8 text-center text-sm text-slate-500">生成预览后，这里会显示最终卡片。</div>
-                      )}
-                    </Surface>
-                  </div>
-
-                  {cardMetaDrawerOpen && (
-                    <Surface className="p-6 xl:sticky xl:top-6">
-                      <div className="mb-4 flex items-center justify-between gap-3">
-                        <div>
-                          <div className="text-lg font-semibold text-slate-900">预览元数据</div>
-                          <div className="mt-1 text-sm text-slate-500">模板附加信息、预览 JSON、调试信息和动作结果统一放在侧边栏。</div>
-                        </div>
-                        <button onClick={() => setCardMetaDrawerOpen(false)} className="rounded-2xl border border-slate-200 px-3 py-2 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">收起</button>
-                      </div>
-                      <div className="grid gap-4">
-                        <Field label="附加信息"><Area rows={8} value={cardTemplateForm.metadata_text} onChange={e => setCardTemplateForm(prev => ({ ...prev, metadata_text: e.target.value }))} /></Field>
-                        <Field label="预览 Card JSON"><Area rows={14} readOnly value={formatJson(cardPreviewCard || {})} /></Field>
-                        <Field label="调试信息"><Area rows={8} readOnly value={formatJson(cardPreviewDebug || {})} /></Field>
-                        <Field label="动作结果"><Area rows={8} readOnly value={cardPreviewActionText || '点击预览卡片中的动作按钮，最终 payload 会显示在这里。'} /></Field>
-                      </div>
-                    </Surface>
-                  )}
-                </div>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => openCardCollectionDialog(selectedCardCollection?.collection_id || NEW_KEY)} disabled={!selectedCardCollection} className="rounded-2xl border border-slate-200 px-3 py-2 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600 disabled:opacity-40">编辑卡片集</button>
+                <button onClick={() => openCardTemplateDialog(NEW_KEY)} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-3 py-2 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><Plus size={12} />新增模板</button>
               </div>
+            </div>
+
+            {filteredCardTemplateGallery.length ? (
+              <div className="space-y-2">
+                {filteredCardTemplateGallery.map(item => {
+                  const active = cardTemplateId === item.template.template_id
+                  return (
+                    <button key={item.template.template_id} onClick={() => setCardTemplateId(item.template.template_id)} className={cx('w-full rounded-[22px] border p-4 text-left transition', active ? 'border-emerald-300 bg-emerald-50/50 shadow-[0_12px_36px_rgba(16,185,129,0.10)]' : 'border-slate-200 bg-[#fbfefd] hover:border-emerald-200 hover:bg-emerald-50/30')}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-slate-900">{item.template.display_name || item.template.template_id}</div>
+                          <div className="mt-1 truncate text-xs text-slate-500">{item.template.template_id}</div>
+                        </div>
+                        {!item.template.enabled && <span className="rounded-full bg-slate-200 px-2.5 py-1 text-[11px] text-slate-600">已停用</span>}
+                      </div>
+                      <div className="mt-3 text-xs leading-5 text-slate-500">{item.template.summary || '未填写模板摘要。'}</div>
+                      <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-500">
+                        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">{item.template.template_type || 'info_detail'}</span>
+                        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">{item.template.renderer_key || '未配置渲染器'}</span>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">当前卡片集还没有模板，点击上方新建。</div>
             )}
-          </div>
+          </Surface>
+
+          {selectedCardTemplate && cardTemplateId !== NEW_KEY ? (
+            <div className="space-y-5">
+              <Surface className="p-6">
+                <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-lg font-semibold text-slate-900">{selectedCardTemplate.display_name || selectedCardTemplate.template_id}</div>
+                    <div className="mt-1 text-sm text-slate-500">{selectedCardTemplate.summary || '点击编辑后可维护模板摘要、Schema 与预览配置。'}</div>
+                    <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-500">
+                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">{selectedCardTemplate.template_id}</span>
+                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">{selectedCardTemplate.template_type || 'info_detail'}</span>
+                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">{selectedCardCollection?.display_name || selectedCardTemplate.collection_id || 'default'}</span>
+                      {!selectedCardTemplate.enabled && <span className="rounded-full bg-slate-200 px-2.5 py-1 text-slate-600">已停用</span>}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button onClick={() => openCardTemplateDialog(selectedCardTemplate.template_id)} className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">编辑模板</button>
+                    <button onClick={() => openCardTemplateDialog(NEW_KEY)} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><Plus size={14} />新增模板</button>
+                  </div>
+                </div>
+
+                <div className="rounded-[28px] border border-slate-200 bg-[#fbfefd] p-4">
+                  <CardRenderer card={selectedTemplateCard} onInspectPath={setCardInspectPath} />
+                </div>
+                <div className="mt-4 space-y-2">
+                  <div className="text-sm font-medium text-slate-900">样例 JSON</div>
+                  {renderHighlightedJson(selectedTemplatePreviewPayload, cardInspectPath)}
+                </div>
+              </Surface>
+
+              <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+                <Surface className="p-6">
+                  <div className="mb-4 text-lg font-semibold text-slate-900">模板结构</div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field label="模板 ID"><Input readOnly value={cardTemplateForm.template_id} /></Field>
+                    <Field label="渲染器 Key"><Input readOnly value={cardTemplateForm.renderer_key} /></Field>
+                    <Field label="数据 Schema"><Area rows={12} readOnly value={cardTemplateForm.data_schema_text} /></Field>
+                    <Field label="UI 模板"><Area rows={12} readOnly value={cardTemplateForm.ui_schema_text} /></Field>
+                    <Field label="动作 Schema"><Area rows={12} readOnly value={cardTemplateForm.action_schema_text} /></Field>
+                    <Field label="样例 Payload"><Area rows={12} readOnly value={cardTemplateForm.sample_payload_text} /></Field>
+                  </div>
+                </Surface>
+
+                <Surface className="p-6">
+                  <div className="mb-4 text-lg font-semibold text-slate-900">模板元数据</div>
+                  <div className="grid gap-4">
+                    <Field label="摘要"><Area rows={4} readOnly value={cardTemplateForm.summary} /></Field>
+                    <Field label="附加信息"><Area rows={18} readOnly value={cardTemplateForm.metadata_text} /></Field>
+                  </div>
+                </Surface>
+              </div>
+            </div>
+          ) : (
+            <Surface className="p-6 text-sm text-slate-500">在中间选择一个模板后，这里会展示卡片样式、Schema 与元数据详情。</Surface>
+          )}
         </div>
       ) : (
         <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
@@ -2797,7 +2817,8 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
                     setAgentId(agents.find(item => item.agent_id !== targetId)?.agent_id || '')
                     setAgentEditorOpen(false)
                   }, '智能体已删除')} disabled={!agentForm.agent_id.trim() || Boolean(selectedAgent?.is_default)} className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 px-4 py-2 text-sm text-rose-600 transition hover:bg-rose-50 disabled:opacity-40"><Trash2 size={14} />删除</button>
-                  <button onClick={() => void runAction(async () => { const saved = await consoleData.publishAgent(agentForm.agent_id); setAgentId(saved.agent_id) }, '智能体已发布')} disabled={!agentForm.agent_id.trim()} className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600 disabled:opacity-40">发布</button>
+                  <button onClick={() => void runAction(async () => { const saved = await consoleData.publishAgent(agentForm.agent_id); setAgentId(saved.agent_id); setAgentForm(prev => ({ ...prev, published: true })) }, '智能体已发布')} disabled={!agentForm.agent_id.trim()} className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600 disabled:opacity-40">发布</button>
+                  <button onClick={() => void openAgentApiDialog(agentForm.agent_id || selectedAgent?.agent_id || '')} disabled={!(selectedAgent?.published || agentForm.published) || !(agentForm.agent_id || selectedAgent?.agent_id)} className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm text-sky-700 transition hover:border-sky-300 hover:text-sky-800 disabled:opacity-40">API 文档</button>
                   <button onClick={() => { setAgentEditorOpen(false); openAgentChat(agentForm.agent_id || selectedAgent?.agent_id || '') }} disabled={!(agentForm.agent_id || selectedAgent?.agent_id)} className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm text-white transition hover:bg-slate-800 disabled:opacity-40"><SendHorizontal size={14} />对话</button>
                 </div>
               </div>
@@ -3049,8 +3070,8 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
 
           <Modal open={skillEditorOpen} onClose={() => setSkillEditorOpen(false)} title={skillName === NEW_KEY ? '新建技能' : skillForm.display_name || skillForm.skill_name || '技能设置'} description="在弹窗中维护技能摘要、正文和绑定工具。" widthClass="max-w-4xl">
             <div className="space-y-5">
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-sm text-slate-500">技能摘要会直接注入系统提示，正文按需加载。</div>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm text-slate-500">技能摘要会注入系统提示词，正文按需由平台加载给模型。</div>
                 <div className="flex items-center gap-2">
                   <button onClick={() => void runAction(async () => { const saved = await consoleData.saveSkill(skillFormToPayload(skillForm)); setSkillName(saved.skill_name); setSkillEditorOpen(false) }, '技能已保存')} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600"><Save size={14} />保存</button>
                   <button onClick={() => void runAction(async () => {
@@ -3109,6 +3130,117 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
                 <div className="md:col-span-2"><Field label="摘要"><Area rows={3} value={skillForm.summary} onChange={e => setSkillForm(prev => ({ ...prev, summary: e.target.value }))} /></Field></div>
                 <div className="md:col-span-2"><Field label="正文 Markdown"><Area rows={12} value={skillForm.document_md} onChange={e => setSkillForm(prev => ({ ...prev, document_md: e.target.value }))} /></Field></div>
               </div>
+            </div>
+          </Modal>
+
+          <Modal open={agentApiDialogOpen} onClose={() => setAgentApiDialogOpen(false)} title={agentApiDocs?.agent_name || agentApiOwnerId || '智能体 API'} description="查看已发布智能体的接口文档，并创建调用 Key。" widthClass="max-w-5xl">
+            <div className="space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm text-slate-500">外部系统可通过 API Key 调用该智能体，支持使用 Swagger 文档查看请求结构与返回格式。</div>
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={() => agentApiDocs && openUrlInNewTab(agentApiDocs.docs_url)} disabled={!agentApiDocs} className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-sky-300 hover:text-sky-700 disabled:opacity-40">打开 Swagger 文档</button>
+                  <button onClick={() => agentApiDocs && copyText(agentApiDocs.invoke_url, '调用地址已复制')} disabled={!agentApiDocs} className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600 disabled:opacity-40">复制调用地址</button>
+                </div>
+              </div>
+
+              {agentApiLoading ? (
+                <Surface className="p-6 text-sm text-slate-500">正在加载智能体 API 信息...</Surface>
+              ) : agentApiDocs ? (
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_360px]">
+                  <div className="space-y-5">
+                    <Surface className="p-6">
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <Field label="调用方式"><Input readOnly value={`${agentApiDocs.method} ${agentApiDocs.invoke_url}`} /></Field>
+                        <Field label="鉴权 Header"><Input readOnly value={`${agentApiDocs.auth.header}: <your-api-key>`} /></Field>
+                        <Field label="Swagger 文档"><Input readOnly value={agentApiDocs.docs_url} /></Field>
+                        <Field label="OpenAPI JSON"><Input readOnly value={agentApiDocs.openapi_url} /></Field>
+                        <div className="md:col-span-2"><Field label="curl 示例"><Area rows={8} readOnly value={agentApiDocs.curl_example} /></Field></div>
+                        <div className="md:col-span-2"><Field label="请求示例 JSON"><Area rows={12} readOnly value={formatJson(agentApiDocs.sample_request)} /></Field></div>
+                      </div>
+                    </Surface>
+
+                    <Surface className="p-6">
+                      <div className="mb-4 flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-lg font-semibold text-slate-900">固定变量要求</div>
+                          <div className="mt-1 text-sm text-slate-500">调用时如该智能体配置了固定变量，请按要求传入 `agent_variables`。</div>
+                        </div>
+                      </div>
+                      {agentApiDocs.required_agent_variables.length ? (
+                        <div className="space-y-3">
+                          {agentApiDocs.required_agent_variables.map(item => (
+                            <div key={item.key} className="rounded-2xl border border-slate-200 bg-[#fbfefd] px-4 py-3">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="text-sm font-medium text-slate-900">{item.label || item.key}</div>
+                                <span className={cx('rounded-full px-2.5 py-1 text-[11px]', item.required ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600')}>{item.required ? '必填' : '可选'}</span>
+                              </div>
+                              <div className="mt-2 text-xs text-slate-500">Key：{item.key}{item.default_value ? ` · 默认值：${item.default_value}` : ''}</div>
+                              <div className="mt-1 text-sm text-slate-600">{item.description || '未填写说明'}</div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">该智能体当前没有固定变量要求，可直接按示例请求调用。</div>
+                      )}
+                    </Surface>
+                  </div>
+
+                  <div className="space-y-5">
+                    <Surface className="p-6">
+                      <div className="mb-4 flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-lg font-semibold text-slate-900">创建 API Key</div>
+                          <div className="mt-1 text-sm text-slate-500">Key 明文只会显示一次，请创建后立即复制保存。</div>
+                        </div>
+                      </div>
+                      <div className="space-y-4">
+                        <Field label="Key 名称"><Input value={agentApiKeyName} onChange={e => setAgentApiKeyName(e.target.value)} placeholder="例如 生产环境调用 / 测试联调" /></Field>
+                        <button onClick={() => void runAction(createAgentApiKey, '智能体 API Key 已创建')} disabled={!agentApiOwnerId} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600 disabled:opacity-40"><Plus size={14} />创建 Key</button>
+                        {agentApiCreatedKey && (
+                          <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
+                            <div className="text-sm font-medium text-emerald-800">新 Key</div>
+                            <div className="mt-2 break-all rounded-2xl border border-emerald-100 bg-white px-3 py-3 text-sm text-slate-700">{agentApiCreatedKey}</div>
+                            <div className="mt-3 flex gap-2">
+                              <button onClick={() => void copyText(agentApiCreatedKey, 'API Key 已复制')} className="rounded-2xl border border-emerald-200 px-3 py-2 text-xs text-emerald-700 transition hover:bg-emerald-100">复制 Key</button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </Surface>
+
+                    <Surface className="p-6">
+                      <div className="mb-4 flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-lg font-semibold text-slate-900">已有 Key</div>
+                          <div className="mt-1 text-sm text-slate-500">仅展示前缀和使用情况，明文不会再次返回。</div>
+                        </div>
+                        <button onClick={() => void runAction(async () => { await loadAgentApiData(agentApiOwnerId) }, '智能体 API 信息已刷新')} disabled={!agentApiOwnerId} className="rounded-2xl border border-slate-200 px-3 py-2 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600 disabled:opacity-40">刷新</button>
+                      </div>
+                      {agentApiKeys.length ? (
+                        <div className="space-y-3">
+                          {agentApiKeys.map(item => (
+                            <div key={item.key_id} className="rounded-2xl border border-slate-200 bg-[#fbfefd] p-4">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="truncate text-sm font-medium text-slate-900">{item.name || item.key_prefix}</div>
+                                  <div className="mt-1 text-xs text-slate-500">前缀：{item.key_prefix}</div>
+                                  <div className="mt-1 text-xs text-slate-500">创建时间：{formatTime(item.created_at)}</div>
+                                  <div className="mt-1 text-xs text-slate-500">最近使用：{item.last_used_at ? formatTime(item.last_used_at) : '尚未使用'}</div>
+                                </div>
+                                <button onClick={() => void runAction(async () => { await removeAgentApiKey(item.key_id) }, '智能体 API Key 已删除')} className="rounded-2xl border border-rose-200 px-3 py-2 text-xs text-rose-600 transition hover:bg-rose-50">删除</button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">当前还没有 API Key，请先创建一个用于外部系统鉴权调用。</div>
+                      )}
+                    </Surface>
+                  </div>
+                </div>
+              ) : (
+                <Surface className="p-6 text-sm text-slate-500">请先发布该智能体，然后再查看 API 文档与创建 Key。</Surface>
+              )}
             </div>
           </Modal>
 

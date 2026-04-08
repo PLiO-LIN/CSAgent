@@ -1,0 +1,83 @@
+{
+  "pack_id": "example_crm",
+  "display_name": "CRM 示例卡片包",
+  "version": "1.0",
+  "collections": [
+    {
+      "collection_id": "crm",
+      "display_name": "CRM",
+      "summary": "客户关系管理相关卡片模板。"
+    }
+  ],
+  "templates": [
+    {
+      "template_id": "crm_customer_profile",
+      "collection_id": "crm",
+      "display_name": "客户画像卡",
+      "summary": "展示客户基础信息、标签与联系方式。",
+      "template_type": "info_detail",
+      "renderer_key": "template::info_detail",
+      "ui_schema": {
+        "blocks": [
+          {"type": "hero", "title": "$.name", "summary": "$.level"},
+          {"type": "badge_list", "path": "$.tags"},
+          {"type": "kv_list", "path": "$.profile_fields"}
+        ]
+      },
+      "action_schema": {
+        "actions": [
+          {"label": "查看详情", "contentTemplate": "请展示 {{name}} 的完整客户档案"}
+        ]
+      },
+      "sample_payload": {
+        "name": "张三",
+        "level": "VIP 客户",
+        "tags": ["高价值", "活跃用户", "续费客户"],
+        "profile_fields": [
+          {"label": "手机号", "value": "138****1234"},
+          {"label": "注册时间", "value": "2024-01-15"},
+          {"label": "累计消费", "value": "12,680 元"},
+          {"label": "最近活跃", "value": "2 天前"}
+        ]
+      },
+      "metadata": {"managed_by": "card_pack::example_crm"}
+    },
+    {
+      "template_id": "crm_deal_pipeline",
+      "collection_id": "crm",
+      "display_name": "商机进度卡",
+      "summary": "展示商机关键指标和当前进度。",
+      "template_type": "metric_summary",
+      "renderer_key": "template::metric_summary",
+      "ui_schema": {
+        "blocks": [
+          {"type": "hero", "title": "$.deal_name", "summary": "$.stage"},
+          {"type": "progress", "path": "$.progress", "label": "成交概率"},
+          {"type": "metric_grid", "path": "$.metrics"},
+          {"type": "kv_list", "path": "$.details"}
+        ]
+      },
+      "action_schema": {
+        "actions": [
+          {"label": "推进商机", "contentTemplate": "请帮我推进商机 {{deal_name}} 到下一阶段"}
+        ]
+      },
+      "sample_payload": {
+        "deal_name": "ABC 公司年度合约",
+        "stage": "方案评估",
+        "progress": 0.65,
+        "metrics": [
+          {"label": "预估金额", "value": "86,000 元"},
+          {"label": "预计成交", "value": "2024-06-30"},
+          {"label": "跟进次数", "value": 12}
+        ],
+        "details": [
+          {"label": "负责人", "value": "李四"},
+          {"label": "创建时间", "value": "2024-03-01"},
+          {"label": "最近跟进", "value": "昨天"}
+        ]
+      },
+      "metadata": {"managed_by": "card_pack::example_crm"}
+    }
+  ]
+}

@@ -137,6 +137,91 @@ export default function TemplateCardRenderer({ card, onAction, onInspectPath }: 
       )
     }
 
+    if (type === 'image') {
+      const src = String(resolveTemplatePath(payload, block.path || '$.image_url') ?? '').trim()
+      if (!src) return null
+      const alt = String(block.alt || block.label || '').trim()
+      return (
+        <div key={`img-${index}`} {...hoverProps(String(block.path || '$.image_url'), onInspectPath)} className="overflow-hidden rounded-2xl border border-[rgba(15,111,255,0.08)] transition hover:border-emerald-200">
+          <img src={src} alt={alt} className="block w-full object-cover" style={{ maxHeight: block.maxHeight || 280 }} />
+          {alt && <div className="bg-[rgba(240,247,255,0.46)] px-3 py-2 text-xs text-slate-500">{alt}</div>}
+        </div>
+      )
+    }
+
+    if (type === 'table') {
+      const rows = toArray(resolveTemplatePath(payload, block.path || '$.rows'))
+      if (!rows.length) return null
+      const columns: string[] = Array.isArray(block.columns) ? block.columns.map(String) : (isPlainObject(rows[0]) ? Object.keys(rows[0]) : ['value'])
+      return (
+        <div key={`table-${index}`} {...hoverProps(String(block.path || '$.rows'), onInspectPath)} className="overflow-hidden rounded-2xl border border-[rgba(15,111,255,0.08)] transition hover:border-emerald-200">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="bg-[rgba(240,247,255,0.58)]">
+                {columns.map(col => <th key={col} className="px-3 py-2 font-medium text-slate-500">{col}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, ri) => {
+                const r = isPlainObject(row) ? row : { value: row }
+                return (
+                  <tr key={`row-${ri}`} className="border-t border-[rgba(15,111,255,0.06)]">
+                    {columns.map(col => <td key={col} className="px-3 py-2 text-slate-700">{displayScalar(r[col] ?? r.value)}</td>)}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )
+    }
+
+    if (type === 'progress') {
+      const raw = resolveTemplatePath(payload, block.path || '$.progress')
+      const pct = Math.max(0, Math.min(1, Number(raw) || 0))
+      const label = String(block.label || '').trim()
+      return (
+        <div key={`progress-${index}`} {...hoverProps(String(block.path || '$.progress'), onInspectPath)} className="rounded-2xl border border-[rgba(15,111,255,0.08)] bg-[rgba(240,247,255,0.46)] px-4 py-3 transition hover:border-emerald-200 hover:bg-emerald-50/70">
+          {label && <div className="mb-2 flex items-center justify-between text-xs"><span className="font-medium text-slate-500">{label}</span><span className="text-slate-700">{Math.round(pct * 100)}%</span></div>}
+          <div className="h-2.5 overflow-hidden rounded-full bg-slate-200">
+            <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${pct * 100}%` }} />
+          </div>
+        </div>
+      )
+    }
+
+    if (type === 'badge_list') {
+      const items = toArray(resolveTemplatePath(payload, block.path || '$.tags'))
+      if (!items.length) return null
+      return (
+        <div key={`badges-${index}`} {...hoverProps(String(block.path || '$.tags'), onInspectPath)} className="flex flex-wrap gap-2 transition">
+          {items.map((item, bi) => (
+            <span key={`badge-${bi}`} className="rounded-full bg-[rgba(15,111,255,0.10)] px-2.5 py-1 text-[11px] font-medium text-[var(--studio-blue-600)]">{displayScalar(isPlainObject(item) ? (item.label || item.value || item.name) : item)}</span>
+          ))}
+        </div>
+      )
+    }
+
+    if (type === 'section') {
+      const sectionTitle = templateText(payload, block.title, String(block.label || ''))
+      if (!sectionTitle) return null
+      return (
+        <div key={`section-${index}`} className="border-t border-[rgba(15,111,255,0.08)] pt-3">
+          <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-slate-400">{sectionTitle}</div>
+        </div>
+      )
+    }
+
+    if (type === 'markdown') {
+      const md = String(resolveTemplatePath(payload, block.path || '$.description') ?? '').trim()
+      if (!md) return null
+      return (
+        <div key={`md-${index}`} {...hoverProps(String(block.path || '$.description'), onInspectPath)} className="rounded-2xl border border-[rgba(15,111,255,0.08)] bg-[rgba(240,247,255,0.46)] px-4 py-3 text-xs leading-6 text-slate-600 whitespace-pre-wrap transition hover:border-emerald-200 hover:bg-emerald-50/70">
+          {md}
+        </div>
+      )
+    }
+
     const value = resolveTemplatePath(payload, block.path || '$')
     if (value === undefined || value === null || value === '') return null
     return (

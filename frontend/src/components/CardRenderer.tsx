@@ -1,6 +1,7 @@
+import { useEffect, useRef } from 'react'
 import type { ChatSendHandler } from '../lib/chatDisplay'
 import TemplateCardRenderer from './TemplateCardRenderer'
-import { isTemplateCard } from '../lib/cardTemplateRuntime'
+import { isTemplateCard, isPlainObject as isPlainObj } from '../lib/cardTemplateRuntime'
 
 interface Props {
   card: any
@@ -84,7 +85,33 @@ function renderValue(label: string, value: unknown, depth = 0): JSX.Element | nu
   )
 }
 
+function IframeCardRenderer({ url, card }: { url: string; card: any }) {
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+  useEffect(() => {
+    const iframe = iframeRef.current
+    if (!iframe) return
+    const onLoad = () => {
+      try {
+        iframe.contentWindow?.postMessage({ type: 'csagent:card:payload', payload: isPlainObj(card?.payload) ? card.payload : card }, '*')
+      } catch { /* cross-origin ok */ }
+    }
+    iframe.addEventListener('load', onLoad)
+    return () => iframe.removeEventListener('load', onLoad)
+  }, [card, url])
+  return (
+    <div className="my-3 overflow-hidden rounded-[22px] border border-[rgba(15,111,255,0.10)] shadow-[0_14px_28px_rgba(13,63,145,0.07)]">
+      <iframe ref={iframeRef} src={url} className="block w-full border-0" style={{ minHeight: 200 }} sandbox="allow-scripts allow-same-origin" title="External Card Renderer" />
+    </div>
+  )
+}
+
 export default function CardRenderer({ card, onAction, onInspectPath }: Props) {
+  const rendererKey = String(card?.renderer_key || '').trim()
+  if (rendererKey.startsWith('iframe::')) {
+    const url = rendererKey.slice('iframe::'.length).trim()
+    if (url) return <IframeCardRenderer url={url} card={card} />
+  }
+
   if (isTemplateCard(card)) {
     return <TemplateCardRenderer card={card} onAction={onAction} onInspectPath={onInspectPath} />
   }

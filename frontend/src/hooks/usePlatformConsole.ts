@@ -6,14 +6,24 @@ export interface ModelCatalogModel {
   display_name: string
   chat_model: string
   enabled: boolean
+  input_cost_per_mtokens: number | null
+  output_cost_per_mtokens: number | null
 }
 
 export interface ModelCatalogVendor {
   vendor_id: string
+  vendor_type: string
   display_name: string
   base_url: string
   enabled: boolean
   models: ModelCatalogModel[]
+}
+
+export interface ModelVendorPreset {
+  vendor_type: string
+  vendor_id: string
+  display_name: string
+  base_url: string
 }
 
 export interface ModelConfig {
@@ -26,6 +36,54 @@ export interface ModelConfig {
   active_model: string
   vendors: ModelCatalogVendor[]
   database_url: string
+}
+
+export interface UsageCounter {
+  total_calls: number
+  completed_calls: number
+  error_calls: number
+  pending_calls: number
+  total_input_tokens: number
+  total_output_tokens: number
+  total_tokens: number
+  input_estimated_cost: number
+  output_estimated_cost: number
+  estimated_cost: number
+  avg_latency_ms: number
+  success_rate: number
+  last_called_at: number
+  unique_sessions: number
+}
+
+export interface UsageTrendPoint extends UsageCounter {
+  date: string
+  label: string
+}
+
+export interface ModelUsageStats extends UsageCounter {
+  model_id: string
+  display_name: string
+  chat_model: string
+  enabled: boolean
+  configured: boolean
+  input_cost_per_mtokens: number | null
+  output_cost_per_mtokens: number | null
+}
+
+export interface VendorUsageStats extends UsageCounter {
+  vendor_id: string
+  display_name: string
+  base_url: string
+  enabled: boolean
+  configured: boolean
+  models: ModelUsageStats[]
+}
+
+export interface FrameworkUsageStats {
+  generated_at: number
+  summary: UsageCounter & { window_days: number }
+  trend: UsageTrendPoint[]
+  vendors: VendorUsageStats[]
 }
 
 export interface McpServerConfig {
@@ -91,6 +149,70 @@ export interface CardPreviewResult {
   debug: Record<string, any>
 }
 
+export interface SkillGenerateRequest {
+  skill_name: string
+  display_name?: string
+  tool_names: string[]
+  model_vendor_id: string
+  model_id: string
+  current_summary?: string
+  current_document_md?: string
+}
+
+export interface SkillGenerateStreamEvent {
+  type: string
+  content?: string
+  text?: string
+  summary?: string
+  document_md?: string
+  vendor_id?: string
+  model_id?: string
+  skill_name?: string
+  tool_count?: number
+  context?: string
+}
+
+export interface AgentApiKeyRecord {
+  key_id: string
+  agent_id: string
+  name: string
+  key_prefix: string
+  enabled: boolean
+  last_used_at: number
+  created_at: number
+  updated_at: number
+}
+
+export interface AgentApiKeyCreateResult {
+  key: string
+  record: AgentApiKeyRecord
+}
+
+export interface AgentApiDocsVariableRecord {
+  key: string
+  label: string
+  description: string
+  default_value: string
+  required: boolean
+}
+
+export interface AgentApiDocsRecord {
+  agent_id: string
+  agent_name: string
+  docs_url: string
+  openapi_url: string
+  invoke_url: string
+  method: string
+  auth: {
+    type: string
+    header: string
+    bearer_supported: boolean
+  }
+  required_agent_variables: AgentApiDocsVariableRecord[]
+  sample_request: Record<string, any>
+  curl_example: string
+}
+
 export interface McpProbeToolRecord {
   public_name: string
   raw_name: string
@@ -129,12 +251,43 @@ export interface ModelProbeResult {
 type AgentRecord = FrameworkInfo['agents'][number]
 type ToolRecord = FrameworkInfo['tools'][number]
 type SkillRecord = FrameworkInfo['skills'][number]
+type CardCollectionRecord = FrameworkInfo['card_collections'][number]
 type CardTemplateRecord = FrameworkInfo['card_templates'][number]
 
-const PRESET_MODEL_VENDORS: ModelCatalogVendor[] = [
+export const MODEL_VENDOR_TYPE_OPTIONS: ModelVendorPreset[] = [
+  {
+    vendor_type: 'siliconflow',
+    vendor_id: 'siliconflow',
+    display_name: '硅基流动',
+    base_url: 'https://api.siliconflow.cn/v1',
+  },
+  {
+    vendor_type: 'openai_completion',
+    vendor_id: 'openai_completion',
+    display_name: 'OpenAI Completion',
+    base_url: 'https://api.openai.com/v1',
+  },
+  {
+    vendor_type: 'aliyun_bailian',
+    vendor_id: 'aliyun_bailian',
+    display_name: '阿里云百炼',
+    base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  },
+  {
+    vendor_type: 'deepseek',
+    vendor_id: 'deepseek',
+    display_name: 'DeepSeek',
+    base_url: 'https://api.deepseek.com',
+  },
+]
+
+const MODEL_VENDOR_PRESET_MAP = new Map(MODEL_VENDOR_TYPE_OPTIONS.map(item => [item.vendor_type, item]))
+
+const DEFAULT_MODEL_VENDORS: ModelCatalogVendor[] = [
   {
     vendor_id: 'siliconflow',
-    display_name: '轨迹流动',
+    vendor_type: 'siliconflow',
+    display_name: '硅基流动',
     base_url: 'https://api.siliconflow.cn/v1',
     enabled: true,
     models: [
@@ -143,12 +296,15 @@ const PRESET_MODEL_VENDORS: ModelCatalogVendor[] = [
         display_name: 'Qwen/Qwen3.5-27B',
         chat_model: 'Qwen/Qwen3.5-27B',
         enabled: true,
+        input_cost_per_mtokens: null,
+        output_cost_per_mtokens: null,
       },
     ],
   },
   {
     vendor_id: 'openai_completion',
-    display_name: 'openai_completion',
+    vendor_type: 'openai_completion',
+    display_name: 'OpenAI Completion',
     base_url: 'https://api.openai.com/v1',
     enabled: true,
     models: [
@@ -157,10 +313,17 @@ const PRESET_MODEL_VENDORS: ModelCatalogVendor[] = [
         display_name: 'gpt-4o-mini',
         chat_model: 'gpt-4o-mini',
         enabled: true,
+        input_cost_per_mtokens: null,
+        output_cost_per_mtokens: null,
       },
     ],
   },
 ]
+
+export function getModelVendorPreset(vendorTypeOrId: unknown) {
+  const normalizedType = normalizeVendorType(vendorTypeOrId)
+  return MODEL_VENDOR_PRESET_MAP.get(normalizedType) || MODEL_VENDOR_PRESET_MAP.get(normalizeVendorId(vendorTypeOrId)) || null
+}
 
 function cloneVendor(vendor: ModelCatalogVendor): ModelCatalogVendor {
   return {
@@ -169,17 +332,117 @@ function cloneVendor(vendor: ModelCatalogVendor): ModelCatalogVendor {
   }
 }
 
+function normalizeVendorType(value: unknown) {
+  const text = String(value || '').trim().toLowerCase()
+  if (!text || text === 'default') return 'siliconflow'
+  if (text === 'openai_comletion') return 'openai_completion'
+  if (text === 'aliyun' || text === 'dashscope' || text === 'qwen') return 'aliyun_bailian'
+  return text
+}
+
 function normalizeVendorId(value: unknown) {
-  const text = String(value || '').trim()
+  const text = String(value || '').trim().toLowerCase()
   return text === 'default' ? 'siliconflow' : text
 }
 
-function normalizeVendorDisplayName(vendorId: string, displayName: unknown) {
+function normalizeVendorDisplayName(vendorId: string, vendorType: string, displayName: unknown) {
   const text = String(displayName || '').trim()
-  if (vendorId === 'siliconflow' && (!text || text === '默认厂商' || text === 'default')) {
-    return '轨迹流动'
+  const preset = getModelVendorPreset(vendorType || vendorId)
+  if (!text || text === '默认厂商' || text === 'default' || text === vendorId || (vendorId === 'siliconflow' && text === '轨迹流动')) {
+    return preset?.display_name || vendorId
   }
-  return text || vendorId
+  return text || preset?.display_name || vendorId
+}
+
+function normalizeVendorBaseUrl(vendorType: string, vendorId: string, baseUrl: unknown) {
+  const text = String(baseUrl || '').trim()
+  if (text) return text
+  return getModelVendorPreset(vendorType || vendorId)?.base_url || ''
+}
+
+function normalizeOptionalNumber(value: unknown) {
+  if (value === null || value === undefined || value === '') return null
+  const next = Number(value)
+  return Number.isFinite(next) ? next : null
+}
+
+function createEmptyUsageCounter(): UsageCounter {
+  return {
+    total_calls: 0,
+    completed_calls: 0,
+    error_calls: 0,
+    pending_calls: 0,
+    total_input_tokens: 0,
+    total_output_tokens: 0,
+    total_tokens: 0,
+    input_estimated_cost: 0,
+    output_estimated_cost: 0,
+    estimated_cost: 0,
+    avg_latency_ms: 0,
+    success_rate: 0,
+    last_called_at: 0,
+    unique_sessions: 0,
+  }
+}
+
+function normalizeUsageCounter(raw?: Partial<UsageCounter> | null): UsageCounter {
+  const defaults = createEmptyUsageCounter()
+  return {
+    total_calls: Number(raw?.total_calls || defaults.total_calls),
+    completed_calls: Number(raw?.completed_calls || defaults.completed_calls),
+    error_calls: Number(raw?.error_calls || defaults.error_calls),
+    pending_calls: Number(raw?.pending_calls || defaults.pending_calls),
+    total_input_tokens: Number(raw?.total_input_tokens || defaults.total_input_tokens),
+    total_output_tokens: Number(raw?.total_output_tokens || defaults.total_output_tokens),
+    total_tokens: Number(raw?.total_tokens || defaults.total_tokens),
+    input_estimated_cost: Number(raw?.input_estimated_cost || defaults.input_estimated_cost),
+    output_estimated_cost: Number(raw?.output_estimated_cost || defaults.output_estimated_cost),
+    estimated_cost: Number(raw?.estimated_cost || defaults.estimated_cost),
+    avg_latency_ms: Number(raw?.avg_latency_ms || defaults.avg_latency_ms),
+    success_rate: Number(raw?.success_rate || defaults.success_rate),
+    last_called_at: Number(raw?.last_called_at || defaults.last_called_at),
+    unique_sessions: Number(raw?.unique_sessions || defaults.unique_sessions),
+  }
+}
+
+function normalizeUsageStats(raw?: Partial<FrameworkUsageStats> | null): FrameworkUsageStats {
+  const summaryCounter = normalizeUsageCounter(raw?.summary)
+  return {
+    generated_at: Number(raw?.generated_at || 0),
+    summary: {
+      ...summaryCounter,
+      window_days: Number((raw?.summary as Record<string, any> | undefined)?.window_days || 7),
+    },
+    trend: Array.isArray(raw?.trend)
+      ? raw!.trend.map(item => ({
+        ...normalizeUsageCounter(item),
+        date: String(item?.date || ''),
+        label: String(item?.label || ''),
+      }))
+      : [],
+    vendors: Array.isArray(raw?.vendors)
+      ? raw!.vendors.map(vendor => ({
+        ...normalizeUsageCounter(vendor),
+        vendor_id: String(vendor?.vendor_id || '').trim(),
+        display_name: String(vendor?.display_name || vendor?.vendor_id || '').trim(),
+        base_url: String(vendor?.base_url || '').trim(),
+        enabled: vendor?.enabled !== false,
+        configured: vendor?.configured !== false,
+        models: Array.isArray(vendor?.models)
+          ? vendor.models.map(model => ({
+            ...normalizeUsageCounter(model),
+            model_id: String(model?.model_id || '').trim(),
+            display_name: String(model?.display_name || model?.model_id || '').trim(),
+            chat_model: String(model?.chat_model || model?.model_id || '').trim(),
+            enabled: model?.enabled !== false,
+            configured: model?.configured !== false,
+            input_cost_per_mtokens: normalizeOptionalNumber(model?.input_cost_per_mtokens),
+            output_cost_per_mtokens: normalizeOptionalNumber(model?.output_cost_per_mtokens),
+          }))
+          : [],
+      }))
+      : [],
+  }
 }
 
 function mergeVendorModels(baseModels: ModelCatalogModel[], incomingModels: ModelCatalogModel[]) {
@@ -201,18 +464,20 @@ function normalizeModelConfig(raw?: Partial<ModelConfig> | null): ModelConfig {
     embed_model: 'BAAI/bge-m3',
     active_vendor: 'siliconflow',
     active_model: 'Qwen/Qwen3.5-27B',
-    vendors: PRESET_MODEL_VENDORS.map(cloneVendor),
+    vendors: DEFAULT_MODEL_VENDORS.map(cloneVendor),
     database_url: 'sqlite+aiosqlite:///./csagent.db',
   }
 
   const vendorMap = new Map(defaults.vendors.map(vendor => [vendor.vendor_id, cloneVendor(vendor)]))
   for (const item of Array.isArray(raw?.vendors) ? raw?.vendors || [] : []) {
-    const vendorId = normalizeVendorId(item?.vendor_id)
+    const vendorId = normalizeVendorId(item?.vendor_id || item?.vendor_type)
+    const vendorType = normalizeVendorType(item?.vendor_type || vendorId)
     if (!vendorId) continue
     const nextVendor: ModelCatalogVendor = {
       vendor_id: vendorId,
-      display_name: normalizeVendorDisplayName(vendorId, item?.display_name),
-      base_url: String(item?.base_url || '').trim(),
+      vendor_type: vendorType || vendorId,
+      display_name: normalizeVendorDisplayName(vendorId, vendorType, item?.display_name),
+      base_url: normalizeVendorBaseUrl(vendorType, vendorId, item?.base_url),
       enabled: item?.enabled !== false,
       models: Array.isArray(item?.models)
         ? item.models
@@ -224,6 +489,8 @@ function normalizeModelConfig(raw?: Partial<ModelConfig> | null): ModelConfig {
               display_name: String(model?.display_name || '').trim() || modelId,
               chat_model: String(model?.chat_model || '').trim() || modelId,
               enabled: model?.enabled !== false,
+              input_cost_per_mtokens: normalizeOptionalNumber(model?.input_cost_per_mtokens),
+              output_cost_per_mtokens: normalizeOptionalNumber(model?.output_cost_per_mtokens),
             }
           })
           .filter((model): model is ModelCatalogModel => Boolean(model))
@@ -270,6 +537,8 @@ function normalizeModelConfig(raw?: Partial<ModelConfig> | null): ModelConfig {
 
 const DEFAULT_MODEL_CONFIG: ModelConfig = normalizeModelConfig()
 
+const DEFAULT_USAGE_STATS: FrameworkUsageStats = normalizeUsageStats()
+
 const DEFAULT_MCP_CONFIG: McpConfig = {
   enabled: false,
   tool_timeout_seconds: 60,
@@ -280,6 +549,7 @@ const EMPTY_INFO: FrameworkInfo = {
   tools: [],
   skills: [],
   agents: [],
+  card_collections: [],
   card_templates: [],
 }
 
@@ -318,6 +588,9 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
   const [configLoading, setConfigLoading] = useState(true)
   const [configSaving, setConfigSaving] = useState(false)
   const [configError, setConfigError] = useState('')
+  const [usageStats, setUsageStats] = useState<FrameworkUsageStats>(DEFAULT_USAGE_STATS)
+  const [usageLoading, setUsageLoading] = useState(true)
+  const [usageError, setUsageError] = useState('')
   const [mcpConfig, setMcpConfig] = useState<McpConfig>(DEFAULT_MCP_CONFIG)
   const [mcpLoading, setMcpLoading] = useState(true)
   const [mcpSaving, setMcpSaving] = useState(false)
@@ -424,6 +697,82 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     return data as AgentRecord
   }, [])
 
+  const getAgentApiDocs = useCallback(async (agentId: string) => {
+    const id = String(agentId || '').trim()
+    if (!id) throw new Error('智能体 ID 不能为空')
+    const resp = await fetch(`/api/platform/agents/${encodeURIComponent(id)}/api-docs`)
+    if (!resp.ok) {
+      let message = '读取智能体 API 文档失败'
+      try {
+        const data = await resp.json()
+        message = data?.detail || message
+      } catch {
+        message = await resp.text() || message
+      }
+      throw new Error(message)
+    }
+    return await resp.json() as AgentApiDocsRecord
+  }, [])
+
+  const listAgentApiKeys = useCallback(async (agentId: string) => {
+    const id = String(agentId || '').trim()
+    if (!id) throw new Error('智能体 ID 不能为空')
+    const resp = await fetch(`/api/platform/agents/${encodeURIComponent(id)}/api-keys`)
+    if (!resp.ok) {
+      let message = '读取智能体 API Key 失败'
+      try {
+        const data = await resp.json()
+        message = data?.detail || message
+      } catch {
+        message = await resp.text() || message
+      }
+      throw new Error(message)
+    }
+    return await resp.json() as AgentApiKeyRecord[]
+  }, [])
+
+  const createAgentApiKey = useCallback(async (agentId: string, name: string) => {
+    const id = String(agentId || '').trim()
+    if (!id) throw new Error('智能体 ID 不能为空')
+    const resp = await fetch(`/api/platform/agents/${encodeURIComponent(id)}/api-keys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: String(name || '').trim() }),
+    })
+    if (!resp.ok) {
+      let message = '创建智能体 API Key 失败'
+      try {
+        const data = await resp.json()
+        message = data?.detail || message
+      } catch {
+        message = await resp.text() || message
+      }
+      throw new Error(message)
+    }
+    return await resp.json() as AgentApiKeyCreateResult
+  }, [])
+
+  const deleteAgentApiKey = useCallback(async (agentId: string, keyId: string) => {
+    const id = String(agentId || '').trim()
+    const targetKeyId = String(keyId || '').trim()
+    if (!id) throw new Error('智能体 ID 不能为空')
+    if (!targetKeyId) throw new Error('Key ID 不能为空')
+    const resp = await fetch(`/api/platform/agents/${encodeURIComponent(id)}/api-keys/${encodeURIComponent(targetKeyId)}`, {
+      method: 'DELETE',
+    })
+    if (!resp.ok) {
+      let message = '删除智能体 API Key 失败'
+      try {
+        const data = await resp.json()
+        message = data?.detail || message
+      } catch {
+        message = await resp.text() || message
+      }
+      throw new Error(message)
+    }
+    return await resp.json() as { ok: boolean; key_id: string; agent_id: string }
+  }, [])
+
   const saveTool = useCallback(async (payload: ToolRecord) => {
     const toolName = String(payload?.tool_name || '').trim()
     if (!toolName) throw new Error('工具名称不能为空')
@@ -514,6 +863,105 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     }))
   }, [])
 
+  const streamSkillGeneration = useCallback(async (
+    payload: SkillGenerateRequest,
+    options?: {
+      signal?: AbortSignal
+      onEvent?: (event: SkillGenerateStreamEvent) => void
+    },
+  ) => {
+    const resp = await fetch('/api/platform/skills/generate/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: options?.signal,
+    })
+    if (!resp.ok) {
+      let message = 'Skill 生成失败'
+      try {
+        const data = await resp.json()
+        message = data?.detail || message
+      } catch {
+        message = await resp.text() || message
+      }
+      throw new Error(message)
+    }
+    if (!resp.body) throw new Error('Skill 生成流不可用')
+
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let doneEvent: SkillGenerateStreamEvent | null = null
+
+    const processLine = (line: string) => {
+      if (!line.startsWith('data: ')) return
+      const raw = line.slice(6).trim()
+      if (!raw) return
+      const event = JSON.parse(raw) as SkillGenerateStreamEvent
+      options?.onEvent?.(event)
+      if (event.type === 'error') {
+        throw new Error(event.text || 'Skill 生成失败')
+      }
+      if (event.type === 'done') {
+        doneEvent = event
+      }
+    }
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        processLine(line)
+      }
+    }
+    if (buffer.trim()) processLine(buffer)
+    return doneEvent
+  }, [])
+
+  const saveCardCollection = useCallback(async (payload: CardCollectionRecord) => {
+    const collectionId = String(payload?.collection_id || '').trim()
+    if (!collectionId) throw new Error('卡片集 ID 不能为空')
+    const exists = (registryInfo.card_collections || []).some(item => item.collection_id === collectionId)
+    const resp = await fetch(exists ? `/api/platform/card-collections/${encodeURIComponent(collectionId)}` : '/api/platform/card-collections', {
+      method: exists ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!resp.ok) throw new Error('保存卡片集失败')
+    const data = await resp.json()
+    setRegistryInfo(prev => ({
+      ...prev,
+      card_collections: upsertByKey(prev.card_collections || [], 'collection_id', data),
+    }))
+    return data as CardCollectionRecord
+  }, [registryInfo.card_collections])
+
+  const deleteCardCollection = useCallback(async (collectionId: string) => {
+    const id = String(collectionId || '').trim()
+    if (!id) throw new Error('卡片集 ID 不能为空')
+    const resp = await fetch(`/api/platform/card-collections/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    })
+    if (!resp.ok) {
+      let message = '删除卡片集失败'
+      try {
+        const data = await resp.json()
+        message = data?.detail || message
+      } catch {
+        message = await resp.text() || message
+      }
+      throw new Error(message)
+    }
+    setRegistryInfo(prev => ({
+      ...prev,
+      card_collections: removeByKey(prev.card_collections || [], 'collection_id', id),
+      card_templates: (prev.card_templates || []).map(template => template.collection_id === id ? { ...template, collection_id: 'default' } : template),
+    }))
+  }, [])
+
   const saveCardTemplate = useCallback(async (payload: CardTemplateRecord) => {
     const templateId = String(payload?.template_id || '').trim()
     if (!templateId) throw new Error('模板 ID 不能为空')
@@ -568,6 +1016,26 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     return await resp.json() as CardPreviewResult
   }, [])
 
+  const importCardPack = useCallback(async (pack: Record<string, any>) => {
+    const resp = await fetch('/api/platform/card-packs/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(pack),
+    })
+    if (!resp.ok) throw new Error('卡片包导入失败')
+    const result = await resp.json()
+    await refreshRegistry()
+    return result as { pack_id: string; display_name: string; collections_imported: number; templates_imported: number; errors: string[] }
+  }, [refreshRegistry])
+
+  const scanCardPacks = useCallback(async () => {
+    const resp = await fetch('/api/platform/card-packs/scan', { method: 'POST' })
+    if (!resp.ok) throw new Error('卡片包扫描失败')
+    const results = await resp.json()
+    await refreshRegistry()
+    return results as Array<{ pack_id: string; display_name: string; collections_imported: number; templates_imported: number; errors: string[] }>
+  }, [refreshRegistry])
+
   const refreshModelConfig = useCallback(async () => {
     setConfigLoading(true)
     setConfigError('')
@@ -609,6 +1077,22 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
       throw err instanceof Error ? err : new Error(message)
     } finally {
       setConfigSaving(false)
+    }
+  }, [])
+
+  const refreshUsageStats = useCallback(async () => {
+    setUsageLoading(true)
+    setUsageError('')
+    try {
+      const resp = await fetch('/api/framework/usage-stats')
+      if (!resp.ok) throw new Error('读取模型调用统计失败')
+      const data = await resp.json()
+      setUsageStats(normalizeUsageStats(data))
+    } catch (err: any) {
+      setUsageError(err?.message || '读取模型调用统计失败')
+      setUsageStats(DEFAULT_USAGE_STATS)
+    } finally {
+      setUsageLoading(false)
     }
   }, [])
 
@@ -724,9 +1208,10 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
 
   useEffect(() => {
     void refreshModelConfig()
+    void refreshUsageStats()
     void refreshMcpConfig()
     void refreshSessions()
-  }, [refreshMcpConfig, refreshModelConfig, refreshSessions])
+  }, [refreshMcpConfig, refreshModelConfig, refreshSessions, refreshUsageStats])
 
   useEffect(() => {
     if (!selectedSessionId) {
@@ -784,17 +1269,27 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     agents: registryInfo.agents,
     tools: adminVisibleTools,
     skills: registryInfo.skills,
+    cardCollections: registryInfo.card_collections || [],
     cardTemplates: registryInfo.card_templates || [],
     saveAgent,
     deleteAgent,
     publishAgent,
+    getAgentApiDocs,
+    listAgentApiKeys,
+    createAgentApiKey,
+    deleteAgentApiKey,
     saveTool,
     deleteTool,
     saveSkill,
     deleteSkill,
+    streamSkillGeneration,
+    saveCardCollection,
+    deleteCardCollection,
     saveCardTemplate,
     deleteCardTemplate,
     previewCard,
+    importCardPack,
+    scanCardPacks,
     syncLocalTools,
     syncMcpTools,
     modelConfig,
@@ -804,6 +1299,10 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     refreshModelConfig,
     saveModelConfig,
     testModelConfig,
+    usageStats,
+    usageLoading,
+    usageError,
+    refreshUsageStats,
     mcpConfig,
     mcpLoading,
     mcpSaving,

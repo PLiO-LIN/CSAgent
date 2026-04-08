@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import PlatformAgentModel, PlatformCardTemplateModel, PlatformSkillModel, PlatformToolModel
+from db.models import PlatformAgentModel, PlatformCardCollectionModel, PlatformCardTemplateModel, PlatformSkillModel, PlatformToolModel
 from framework_profile import load_framework_profile
 from mcp_card_contract import extract_tool_card_binding, extract_tool_card_type, extract_tool_icons
 from runtime_scope import current_runtime_scope
@@ -95,8 +95,19 @@ class PlatformAgentRecord(BaseModel):
     updated_at: float = 0
 
 
+class PlatformCardCollectionRecord(BaseModel):
+    collection_id: str
+    display_name: str = ""
+    summary: str = ""
+    enabled: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: float = 0
+    updated_at: float = 0
+
+
 class PlatformCardTemplateRecord(BaseModel):
     template_id: str
+    collection_id: str = "default"
     display_name: str = ""
     summary: str = ""
     enabled: bool = True
@@ -134,7 +145,28 @@ class AgentRuntimeConfig(BaseModel):
 _tool_cache: dict[str, PlatformToolRecord] = {}
 _skill_cache: dict[str, PlatformSkillRecord] = {}
 _agent_cache: dict[str, PlatformAgentRecord] = {}
+_card_collection_cache: dict[str, PlatformCardCollectionRecord] = {}
 _card_template_cache: dict[str, PlatformCardTemplateRecord] = {}
+
+
+DEFAULT_CARD_COLLECTION_ID = "default"
+TELECOM_CARD_COLLECTION_ID = "telecom"
+
+
+DEFAULT_CARD_COLLECTIONS: tuple[PlatformCardCollectionRecord, ...] = (
+    PlatformCardCollectionRecord(
+        collection_id=DEFAULT_CARD_COLLECTION_ID,
+        display_name="通用卡片",
+        summary="放平台通用或未明确业务域的卡片模板。",
+        metadata={"managed_by": "platform_default_collection"},
+    ),
+    PlatformCardCollectionRecord(
+        collection_id=TELECOM_CARD_COLLECTION_ID,
+        display_name="电信",
+        summary="放电信业务域相关卡片模板。",
+        metadata={"managed_by": "platform_default_collection"},
+    ),
+)
 
 
 DEFAULT_CARD_TEMPLATES: tuple[PlatformCardTemplateRecord, ...] = (
@@ -351,9 +383,35 @@ def _record_from_tool_model(model: PlatformToolModel) -> PlatformToolRecord:
     )
 
 
+def _normalize_card_collection_id(value: str | None = "", fallback: str = DEFAULT_CARD_COLLECTION_ID) -> str:
+    text = str(value or "").strip()
+    return text or fallback
+
+
+def _default_collection_id_for_template(template_id: str = "", metadata: dict[str, Any] | None = None) -> str:
+    key = str(template_id or "").strip().lower()
+    managed_by = str((metadata or {}).get("managed_by") or "").strip().lower()
+    if key.startswith("telecom_") or "telecom" in managed_by:
+        return TELECOM_CARD_COLLECTION_ID
+    return DEFAULT_CARD_COLLECTION_ID
+
+
+def _record_from_card_collection_model(model: PlatformCardCollectionModel) -> PlatformCardCollectionRecord:
+    return PlatformCardCollectionRecord(
+        collection_id=_normalize_card_collection_id(str(model.collection_id or "")),
+        display_name=str(model.display_name or "").strip(),
+        summary=str(model.summary or "").strip(),
+        enabled=bool(model.enabled),
+        metadata=dict(model.metadata_ or {}),
+        created_at=float(model.created_at or 0),
+        updated_at=float(model.updated_at or 0),
+    )
+
+
 def _record_from_card_template_model(model: PlatformCardTemplateModel) -> PlatformCardTemplateRecord:
     return PlatformCardTemplateRecord(
         template_id=str(model.template_id or "").strip(),
+        collection_id=_normalize_card_collection_id(getattr(model, "collection_id", "") or _default_collection_id_for_template(str(model.template_id or ""), dict(model.metadata_ or {}))),
         display_name=str(model.display_name or "").strip(),
         summary=str(model.summary or "").strip(),
         enabled=bool(model.enabled),
@@ -513,10 +571,12 @@ async def refresh_registry_cache(db: AsyncSession) -> None:
     tool_rows = await db.execute(select(PlatformToolModel))
     skill_rows = await db.execute(select(PlatformSkillModel))
     agent_rows = await db.execute(select(PlatformAgentModel))
+    card_collection_rows = await db.execute(select(PlatformCardCollectionModel))
     card_template_rows = await db.execute(select(PlatformCardTemplateModel))
     _tool_cache.clear()
     _skill_cache.clear()
     _agent_cache.clear()
+    _card_collection_cache.clear()
     _card_template_cache.clear()
     for row in tool_rows.scalars().all():
         record = _record_from_tool_model(row)
@@ -527,6 +587,9 @@ async def refresh_registry_cache(db: AsyncSession) -> None:
     for row in agent_rows.scalars().all():
         record = _record_from_agent_model(row)
         _agent_cache[record.agent_id] = record
+    for row in card_collection_rows.scalars().all():
+        record = _record_from_card_collection_model(row)
+        _card_collection_cache[record.collection_id] = record
     for row in card_template_rows.scalars().all():
         record = _record_from_card_template_model(row)
         _card_template_cache[record.template_id] = record
@@ -537,8 +600,36 @@ async def bootstrap_platform_registry(db: AsyncSession) -> None:
     await remove_seed_skills_from_registry(db)
     await sync_mcp_tools_into_registry(db, force=False)
     await ensure_default_agent(db)
+    await ensure_default_card_collections(db)
     await ensure_default_card_templates(db)
+    await scan_card_packs_directory(db)
+    await reconcile_card_template_collections(db)
     await refresh_registry_cache(db)
+
+
+async def ensure_default_card_collections(db: AsyncSession) -> list[PlatformCardCollectionRecord]:
+    now = time.time()
+    created_ids: list[str] = []
+    for record in DEFAULT_CARD_COLLECTIONS:
+        existing = await db.get(PlatformCardCollectionModel, record.collection_id)
+        if existing is not None:
+            continue
+        model = PlatformCardCollectionModel(
+            collection_id=record.collection_id,
+            display_name=record.display_name or record.collection_id,
+            summary=record.summary,
+            enabled=bool(record.enabled),
+            metadata_=dict(record.metadata or {}),
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(model)
+        created_ids.append(record.collection_id)
+    if created_ids:
+        await db.commit()
+    await refresh_registry_cache(db)
+    created_set = set(created_ids)
+    return [record for record in list_card_collection_records(include_disabled=True) if record.collection_id in created_set]
 
 
 async def ensure_default_card_templates(db: AsyncSession) -> list[PlatformCardTemplateRecord]:
@@ -550,6 +641,7 @@ async def ensure_default_card_templates(db: AsyncSession) -> list[PlatformCardTe
             continue
         model = PlatformCardTemplateModel(
             template_id=record.template_id,
+            collection_id=_default_collection_id_for_template(record.template_id, record.metadata),
             display_name=record.display_name or record.template_id,
             summary=record.summary,
             enabled=bool(record.enabled),
@@ -569,6 +661,30 @@ async def ensure_default_card_templates(db: AsyncSession) -> list[PlatformCardTe
         await db.commit()
         await refresh_registry_cache(db)
     return [record for record in list_card_template_records(include_disabled=True) if record.template_id in set(created_ids)]
+
+
+async def reconcile_card_template_collections(db: AsyncSession) -> None:
+    collection_rows = await db.execute(select(PlatformCardCollectionModel.collection_id))
+    valid_collection_ids = {str(item or "").strip() for item in collection_rows.scalars().all() if str(item or "").strip()}
+    if not valid_collection_ids:
+        valid_collection_ids = {DEFAULT_CARD_COLLECTION_ID}
+    now = time.time()
+    changed = False
+    template_rows = await db.execute(select(PlatformCardTemplateModel))
+    for model in template_rows.scalars().all():
+        current_collection_id = _normalize_card_collection_id(getattr(model, "collection_id", ""), fallback="")
+        next_collection_id = current_collection_id if current_collection_id in valid_collection_ids else _default_collection_id_for_template(str(model.template_id or ""), dict(model.metadata_ or {}))
+        if next_collection_id not in valid_collection_ids:
+            next_collection_id = DEFAULT_CARD_COLLECTION_ID
+        if current_collection_id == next_collection_id:
+            continue
+        model.collection_id = next_collection_id
+        model.updated_at = now
+        db.add(model)
+        changed = True
+    if changed:
+        await db.commit()
+        await refresh_registry_cache(db)
 
 
 async def sync_local_tools_into_registry(db: AsyncSession) -> list[PlatformToolRecord]:
@@ -819,11 +935,32 @@ async def upsert_agent_record(db: AsyncSession, payload: PlatformAgentRecord) ->
     return _agent_cache[payload.agent_id]
 
 
+async def upsert_card_collection_record(db: AsyncSession, payload: PlatformCardCollectionRecord) -> PlatformCardCollectionRecord:
+    now = time.time()
+    collection_id = _normalize_card_collection_id(payload.collection_id)
+    model = await db.get(PlatformCardCollectionModel, collection_id)
+    if model is None:
+        model = PlatformCardCollectionModel(collection_id=collection_id, created_at=now)
+    model.display_name = payload.display_name or collection_id
+    model.summary = payload.summary
+    model.enabled = bool(payload.enabled)
+    model.metadata_ = dict(payload.metadata or {})
+    model.updated_at = now
+    db.add(model)
+    await db.commit()
+    await refresh_registry_cache(db)
+    return _card_collection_cache[collection_id]
+
+
 async def upsert_card_template_record(db: AsyncSession, payload: PlatformCardTemplateRecord) -> PlatformCardTemplateRecord:
     now = time.time()
     model = await db.get(PlatformCardTemplateModel, payload.template_id)
     if model is None:
         model = PlatformCardTemplateModel(template_id=payload.template_id, created_at=now)
+    collection_id = _normalize_card_collection_id(payload.collection_id, fallback=_default_collection_id_for_template(payload.template_id, payload.metadata))
+    if await db.get(PlatformCardCollectionModel, collection_id) is None:
+        collection_id = DEFAULT_CARD_COLLECTION_ID
+    model.collection_id = collection_id
     model.display_name = payload.display_name or payload.template_id
     model.summary = payload.summary
     model.enabled = bool(payload.enabled)
@@ -915,6 +1052,27 @@ async def delete_card_template_record(db: AsyncSession, template_id: str) -> boo
     return True
 
 
+async def delete_card_collection_record(db: AsyncSession, collection_id: str) -> bool:
+    key = str(collection_id or "").strip()
+    if not key:
+        return False
+    if key == DEFAULT_CARD_COLLECTION_ID:
+        raise ValueError("默认卡片集不能删除")
+    model = await db.get(PlatformCardCollectionModel, key)
+    if model is None:
+        return False
+    now = time.time()
+    template_rows = await db.execute(select(PlatformCardTemplateModel).where(PlatformCardTemplateModel.collection_id == key))
+    for template in template_rows.scalars().all():
+        template.collection_id = DEFAULT_CARD_COLLECTION_ID
+        template.updated_at = now
+        db.add(template)
+    await db.delete(model)
+    await db.commit()
+    await refresh_registry_cache(db)
+    return True
+
+
 async def delete_agent_record(db: AsyncSession, agent_id: str) -> bool:
     key = str(agent_id or "").strip()
     if not key:
@@ -948,6 +1106,7 @@ async def get_registry_snapshot(db: AsyncSession) -> dict[str, Any]:
         "tools": [record.model_dump(by_alias=True) for record in list_tool_records(include_disabled=True)],
         "skills": [record.model_dump(by_alias=True) for record in list_skill_records(include_disabled=True, scoped=False)],
         "agents": [record.model_dump(by_alias=True) for record in list_agent_records(include_disabled=True)],
+        "card_collections": [record.model_dump(by_alias=True) for record in list_card_collection_records(include_disabled=True)],
         "card_templates": [record.model_dump(by_alias=True) for record in list_card_template_records(include_disabled=True)],
     }
 
@@ -1004,11 +1163,22 @@ def list_agent_records(include_disabled: bool = False) -> list[PlatformAgentReco
     return sorted(records, key=lambda item: item.agent_id)
 
 
+def list_card_collection_records(include_disabled: bool = False) -> list[PlatformCardCollectionRecord]:
+    records = list(_card_collection_cache.values())
+    if not include_disabled:
+        records = [record for record in records if record.enabled]
+    return sorted(records, key=lambda item: item.collection_id)
+
+
 def list_card_template_records(include_disabled: bool = False) -> list[PlatformCardTemplateRecord]:
     records = list(_card_template_cache.values())
     if not include_disabled:
         records = [record for record in records if record.enabled]
-    return sorted(records, key=lambda item: item.template_id)
+    return sorted(records, key=lambda item: (item.collection_id, item.template_id))
+
+
+def get_card_collection_record(collection_id: str = "") -> PlatformCardCollectionRecord | None:
+    return _card_collection_cache.get(str(collection_id or "").strip())
 
 
 def get_card_template_record(template_id: str = "") -> PlatformCardTemplateRecord | None:
@@ -1112,4 +1282,80 @@ def visible_tool_names_for_agent(agent_id: str = "", active_skill_names: list[st
         if skill and skill.enabled:
             names.extend(skill.tool_names)
     return _dedupe_text_list(names)
+
+
+# ---------------------------------------------------------------------------
+# Card pack import & directory scanning
+# ---------------------------------------------------------------------------
+
+CARD_PACKS_DIR = "card_packs"
+
+
+class CardPackResult(BaseModel):
+    pack_id: str = ""
+    display_name: str = ""
+    collections_imported: int = 0
+    templates_imported: int = 0
+    errors: list[str] = Field(default_factory=list)
+
+
+def _parse_card_pack(raw: dict[str, Any]) -> tuple[list[PlatformCardCollectionRecord], list[PlatformCardTemplateRecord], list[str]]:
+    errors: list[str] = []
+    collections: list[PlatformCardCollectionRecord] = []
+    templates: list[PlatformCardTemplateRecord] = []
+    for item in raw.get("collections") or []:
+        try:
+            collections.append(PlatformCardCollectionRecord(**item))
+        except Exception as exc:
+            errors.append(f"collection parse error: {exc}")
+    for item in raw.get("templates") or []:
+        try:
+            templates.append(PlatformCardTemplateRecord(**item))
+        except Exception as exc:
+            errors.append(f"template parse error: {exc}")
+    return collections, templates, errors
+
+
+async def import_card_pack(db: AsyncSession, raw: dict[str, Any]) -> CardPackResult:
+    pack_id = str(raw.get("pack_id") or "").strip()
+    display_name = str(raw.get("display_name") or pack_id).strip()
+    collections, templates, parse_errors = _parse_card_pack(raw)
+    result = CardPackResult(pack_id=pack_id, display_name=display_name, errors=list(parse_errors))
+    for collection in collections:
+        try:
+            await upsert_card_collection_record(db, collection)
+            result.collections_imported += 1
+        except Exception as exc:
+            result.errors.append(f"collection upsert error [{collection.collection_id}]: {exc}")
+    for template in templates:
+        try:
+            await upsert_card_template_record(db, template)
+            result.templates_imported += 1
+        except Exception as exc:
+            result.errors.append(f"template upsert error [{template.template_id}]: {exc}")
+    return result
+
+
+async def scan_card_packs_directory(db: AsyncSession) -> list[CardPackResult]:
+    import json
+    import pathlib
+    base_dir = pathlib.Path(CARD_PACKS_DIR)
+    if not base_dir.is_dir():
+        logger.info("Card packs directory %s does not exist, skipping scan.", base_dir)
+        return []
+    results: list[CardPackResult] = []
+    for path in sorted(base_dir.glob("*.json")):
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                results.append(CardPackResult(pack_id=path.stem, errors=[f"invalid JSON structure in {path.name}"]))
+                continue
+            if not raw.get("pack_id"):
+                raw["pack_id"] = path.stem
+            result = await import_card_pack(db, raw)
+            results.append(result)
+            logger.info("Imported card pack %s from %s: %d collections, %d templates", result.pack_id, path.name, result.collections_imported, result.templates_imported)
+        except Exception as exc:
+            results.append(CardPackResult(pack_id=path.stem, errors=[f"file read error: {exc}"]))
+    return results
 
