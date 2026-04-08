@@ -16,6 +16,16 @@ from runtime_scope import current_runtime_scope
 logger = logging.getLogger(__name__)
 
 
+class CardPackSummary(BaseModel):
+    pack_id: str = ""
+    display_name: str = ""
+    version: str = ""
+    collections: int = 0
+    templates: int = 0
+    collection_ids: list[str] = Field(default_factory=list)
+    template_ids: list[str] = Field(default_factory=list)
+
+
 class PlatformToolRecord(BaseModel):
     tool_name: str
     display_name: str = ""
@@ -383,6 +393,34 @@ def _record_from_tool_model(model: PlatformToolModel) -> PlatformToolRecord:
     )
 
 
+def _mcp_server_name_from_tool_record(record: PlatformToolRecord | None) -> str:
+    if not record:
+        return ""
+    source_ref = str(record.source_ref or "").strip()
+    if source_ref.lower().startswith("mcp:"):
+        return source_ref.split(":", 1)[1].strip()
+    transport_server = record.transport_config.get("server") if isinstance(record.transport_config, dict) else ""
+    return str(transport_server or "").strip()
+
+
+def _is_tool_effectively_enabled(record: PlatformToolRecord | None) -> bool:
+    if not record or not record.enabled:
+        return False
+    if str(record.provider_type or "").strip().lower() != "mcp":
+        return True
+    try:
+        from config import settings
+    except Exception:
+        return True
+    if not bool(getattr(settings, "mcp_enabled", False)):
+        return False
+    server_name = _mcp_server_name_from_tool_record(record)
+    if not server_name:
+        return True
+    server_config = (getattr(settings, "mcp_servers", {}) or {}).get(server_name)
+    return bool(server_config and getattr(server_config, "enabled", False))
+
+
 def _normalize_card_collection_id(value: str | None = "", fallback: str = DEFAULT_CARD_COLLECTION_ID) -> str:
     text = str(value or "").strip()
     return text or fallback
@@ -736,6 +774,7 @@ async def sync_local_tools_into_registry(db: AsyncSession) -> list[PlatformToolR
 
 
 async def sync_mcp_tools_into_registry(db: AsyncSession, force: bool = True) -> list[PlatformToolRecord]:
+    from config import settings
     from mcp_runtime import ensure_mcp_tools_loaded
     from tool.registry import all_tools as runtime_all_tools
 
@@ -783,6 +822,15 @@ async def sync_mcp_tools_into_registry(db: AsyncSession, force: bool = True) -> 
     rows = await db.execute(select(PlatformToolModel).where(PlatformToolModel.provider_type == "mcp"))
     for model in rows.scalars().all():
         if model.tool_name not in synced_names:
+            server_name = str(model.source_ref or "").split(":", 1)[1].strip() if str(model.source_ref or "").lower().startswith("mcp:") else str((model.transport_config or {}).get("server") or "").strip()
+            server_config = (getattr(settings, "mcp_servers", {}) or {}).get(server_name)
+            if server_config is None:
+                await db.delete(model)
+                continue
+            if not bool(getattr(settings, "mcp_enabled", False)):
+                continue
+            if server_config is not None and not bool(getattr(server_config, "enabled", False)):
+                continue
             await db.delete(model)
     await db.commit()
     await refresh_registry_cache(db)
@@ -1114,7 +1162,7 @@ async def get_registry_snapshot(db: AsyncSession) -> dict[str, Any]:
 def list_tool_records(include_disabled: bool = False) -> list[PlatformToolRecord]:
     records = list(_tool_cache.values())
     if not include_disabled:
-        records = [record for record in records if record.enabled]
+        records = [record for record in records if _is_tool_effectively_enabled(record)]
     return sorted(records, key=lambda item: item.tool_name)
 
 
@@ -1220,7 +1268,7 @@ def resolve_agent_runtime(agent_id: str = "") -> AgentRuntimeConfig:
             tool_arg_bindings=[],
             memory_config={"enabled": bool(profile.long_term_memory.enabled), "top_k": int(profile.long_term_memory.top_k or 0)},
         )
-    allowed_global_tool_names = [name for name in _dedupe_text_list(agent.global_tool_names) if _tool_cache.get(name) and _tool_cache[name].enabled]
+    allowed_global_tool_names = [name for name in _dedupe_text_list(agent.global_tool_names) if _is_tool_effectively_enabled(_tool_cache.get(name))]
     allowed_skill_names = [name for name in _dedupe_text_list(agent.skill_names) if _skill_cache.get(name) and _skill_cache[name].enabled]
     if not allowed_global_tool_names:
         allowed_global_tool_names = enabled_global_tool_names
@@ -1266,7 +1314,7 @@ def list_visible_tool_records() -> list[PlatformToolRecord]:
     seen: set[str] = set()
     for tool_name in allowed_names:
         record = _tool_cache.get(tool_name)
-        if not record or not record.enabled or record.tool_name in seen:
+        if not _is_tool_effectively_enabled(record) or (record and record.tool_name in seen):
             continue
         seen.add(record.tool_name)
         visible.append(record)
@@ -1316,19 +1364,231 @@ def _parse_card_pack(raw: dict[str, Any]) -> tuple[list[PlatformCardCollectionRe
     return collections, templates, errors
 
 
+def _extract_card_pack_meta(metadata: dict[str, Any] | None) -> tuple[str, str, str]:
+    payload = dict(metadata or {})
+    pack_id = str(payload.get("card_pack_id") or "").strip()
+    managed_by = str(payload.get("managed_by") or "").strip()
+    if not pack_id and managed_by.lower().startswith("card_pack::"):
+        pack_id = managed_by.split("::", 1)[1].strip()
+    display_name = str(payload.get("card_pack_display_name") or payload.get("pack_display_name") or "").strip()
+    version = str(payload.get("card_pack_version") or payload.get("version") or "").strip()
+    return pack_id, display_name, version
+
+
+def _decorate_card_pack_metadata(metadata: dict[str, Any] | None, pack_id: str, display_name: str = "", version: str = "") -> dict[str, Any]:
+    payload = dict(metadata or {})
+    if pack_id:
+        payload["card_pack_id"] = pack_id
+        payload.setdefault("managed_by", f"card_pack::{pack_id}")
+    if display_name:
+        payload["card_pack_display_name"] = display_name
+    if version:
+        payload["card_pack_version"] = version
+    return payload
+
+
+def _serialize_card_collection_for_pack(record: PlatformCardCollectionRecord) -> dict[str, Any]:
+    return {
+        "collection_id": record.collection_id,
+        "display_name": record.display_name,
+        "summary": record.summary,
+        "enabled": record.enabled,
+        "metadata": dict(record.metadata or {}),
+    }
+
+
+def _serialize_card_template_for_pack(record: PlatformCardTemplateRecord) -> dict[str, Any]:
+    return {
+        "template_id": record.template_id,
+        "collection_id": record.collection_id,
+        "display_name": record.display_name,
+        "summary": record.summary,
+        "enabled": record.enabled,
+        "template_type": record.template_type,
+        "renderer_key": record.renderer_key,
+        "data_schema": dict(record.data_schema or {}),
+        "ui_schema": dict(record.ui_schema or {}),
+        "action_schema": dict(record.action_schema or {}),
+        "sample_payload": dict(record.sample_payload or {}),
+        "metadata": dict(record.metadata or {}),
+    }
+
+
+def list_card_pack_summaries() -> list[CardPackSummary]:
+    summary_map: dict[str, CardPackSummary] = {}
+    for collection in list_card_collection_records(include_disabled=True):
+        pack_id, display_name, version = _extract_card_pack_meta(collection.metadata)
+        if not pack_id:
+            continue
+        summary = summary_map.get(pack_id)
+        if summary is None:
+            summary = CardPackSummary(pack_id=pack_id, display_name=display_name or pack_id, version=version)
+            summary_map[pack_id] = summary
+        if display_name and not summary.display_name:
+            summary.display_name = display_name
+        if version and not summary.version:
+            summary.version = version
+        if collection.collection_id and collection.collection_id not in summary.collection_ids:
+            summary.collection_ids.append(collection.collection_id)
+    for template in list_card_template_records(include_disabled=True):
+        pack_id, display_name, version = _extract_card_pack_meta(template.metadata)
+        if not pack_id:
+            continue
+        summary = summary_map.get(pack_id)
+        if summary is None:
+            summary = CardPackSummary(pack_id=pack_id, display_name=display_name or pack_id, version=version)
+            summary_map[pack_id] = summary
+        if display_name and not summary.display_name:
+            summary.display_name = display_name
+        if version and not summary.version:
+            summary.version = version
+        if template.collection_id and template.collection_id not in summary.collection_ids:
+            summary.collection_ids.append(template.collection_id)
+        if template.template_id and template.template_id not in summary.template_ids:
+            summary.template_ids.append(template.template_id)
+    for summary in summary_map.values():
+        summary.collections = len(summary.collection_ids)
+        summary.templates = len(summary.template_ids)
+        if not summary.display_name:
+            summary.display_name = summary.pack_id
+    return sorted(summary_map.values(), key=lambda item: item.pack_id)
+
+
+def export_card_pack_payload(pack_id: str) -> dict[str, Any]:
+    target_pack_id = str(pack_id or "").strip()
+    if not target_pack_id:
+        raise ValueError("卡片包 ID 不能为空")
+    summaries = {item.pack_id: item for item in list_card_pack_summaries()}
+    summary = summaries.get(target_pack_id)
+    if summary is None:
+        raise KeyError(target_pack_id)
+    matched_templates = [
+        item for item in list_card_template_records(include_disabled=True)
+        if _extract_card_pack_meta(item.metadata)[0] == target_pack_id
+    ]
+    collection_ids = {item.collection_id for item in matched_templates if item.collection_id}
+    for collection in list_card_collection_records(include_disabled=True):
+        current_pack_id, _, _ = _extract_card_pack_meta(collection.metadata)
+        if current_pack_id == target_pack_id or collection.collection_id in collection_ids:
+            collection_ids.add(collection.collection_id)
+    matched_collections = [
+        item for item in list_card_collection_records(include_disabled=True)
+        if item.collection_id in collection_ids
+    ]
+    return {
+        "pack_id": target_pack_id,
+        "display_name": summary.display_name or target_pack_id,
+        "version": summary.version or "1.0",
+        "_instructions": {
+            "summary": "导出的卡片包可直接再次导入平台。",
+            "notes": [
+                "collections 与 templates 会一并导出。",
+                "metadata 中会保留 card_pack_id / card_pack_display_name / card_pack_version 等来源信息。",
+                "如果你要制作新卡片包，可先下载导入模板后再按说明填写。",
+            ],
+        },
+        "collections": [_serialize_card_collection_for_pack(item) for item in matched_collections],
+        "templates": [_serialize_card_template_for_pack(item) for item in matched_templates],
+    }
+
+
+def get_card_pack_template_payload() -> dict[str, Any]:
+    example_pack_id = "your_pack_id"
+    return {
+        "pack_id": example_pack_id,
+        "display_name": "你的卡片包名称",
+        "version": "1.0",
+        "_instructions": {
+            "summary": "这是卡片包导入模板。保留 pack_id / display_name / version / collections / templates 这几个主字段即可。",
+            "required_fields": [
+                "pack_id",
+                "display_name",
+                "collections[].collection_id",
+                "templates[].template_id",
+                "templates[].collection_id",
+                "templates[].template_type",
+                "templates[].renderer_key",
+                "templates[].ui_schema",
+            ],
+            "notes": [
+                "collections 用来声明卡片集。",
+                "templates 用来声明卡片模板；collection_id 需要指向已声明的卡片集。",
+                "metadata 可自由扩展，平台会自动补充 card_pack_id 等来源信息。",
+                "_instructions 字段仅用于说明，不参与导入逻辑。",
+            ],
+        },
+        "collections": [
+            {
+                "collection_id": "demo_collection",
+                "display_name": "演示卡片集",
+                "summary": "用于展示某一业务域下的卡片模板。",
+                "enabled": True,
+                "metadata": {
+                    "managed_by": f"card_pack::{example_pack_id}",
+                    "card_pack_id": example_pack_id,
+                    "card_pack_display_name": "你的卡片包名称",
+                    "card_pack_version": "1.0",
+                },
+            },
+        ],
+        "templates": [
+            {
+                "template_id": "demo_template",
+                "collection_id": "demo_collection",
+                "display_name": "演示模板",
+                "summary": "展示标题、标签和键值列表的基础模板。",
+                "enabled": True,
+                "template_type": "info_detail",
+                "renderer_key": "template::info_detail",
+                "data_schema": {},
+                "ui_schema": {
+                    "blocks": [
+                        {"type": "hero", "title": "$.title", "summary": "$.summary"},
+                        {"type": "badge_list", "path": "$.tags"},
+                        {"type": "kv_list", "path": "$.details"},
+                    ],
+                },
+                "action_schema": {
+                    "actions": [
+                        {"label": "查看详情", "contentTemplate": "请展开 {{title}} 的详细信息"},
+                    ],
+                },
+                "sample_payload": {
+                    "title": "演示卡片标题",
+                    "summary": "演示卡片摘要",
+                    "tags": ["模板", "说明"],
+                    "details": [
+                        {"label": "字段 A", "value": "值 A"},
+                        {"label": "字段 B", "value": "值 B"},
+                    ],
+                },
+                "metadata": {
+                    "managed_by": f"card_pack::{example_pack_id}",
+                    "card_pack_id": example_pack_id,
+                    "card_pack_display_name": "你的卡片包名称",
+                    "card_pack_version": "1.0",
+                },
+            },
+        ],
+    }
+
+
 async def import_card_pack(db: AsyncSession, raw: dict[str, Any]) -> CardPackResult:
     pack_id = str(raw.get("pack_id") or "").strip()
     display_name = str(raw.get("display_name") or pack_id).strip()
+    version = str(raw.get("version") or "").strip()
     collections, templates, parse_errors = _parse_card_pack(raw)
     result = CardPackResult(pack_id=pack_id, display_name=display_name, errors=list(parse_errors))
     for collection in collections:
         try:
+            collection.metadata = _decorate_card_pack_metadata(collection.metadata, pack_id, display_name, version)
             await upsert_card_collection_record(db, collection)
             result.collections_imported += 1
         except Exception as exc:
             result.errors.append(f"collection upsert error [{collection.collection_id}]: {exc}")
     for template in templates:
         try:
+            template.metadata = _decorate_card_pack_metadata(template.metadata, pack_id, display_name, version)
             await upsert_card_template_record(db, template)
             result.templates_imported += 1
         except Exception as exc:

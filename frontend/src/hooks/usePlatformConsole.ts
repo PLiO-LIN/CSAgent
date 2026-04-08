@@ -1036,6 +1036,29 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     return results as Array<{ pack_id: string; display_name: string; collections_imported: number; templates_imported: number; errors: string[] }>
   }, [refreshRegistry])
 
+  const getCardPackTemplate = useCallback(async () => {
+    const resp = await fetch('/api/platform/card-packs/template')
+    if (!resp.ok) throw new Error('读取卡片包模板失败')
+    return await resp.json() as Record<string, any>
+  }, [])
+
+  const exportCardPack = useCallback(async (packId: string) => {
+    const targetPackId = String(packId || '').trim()
+    if (!targetPackId) throw new Error('卡片包 ID 不能为空')
+    const resp = await fetch(`/api/platform/card-packs/${encodeURIComponent(targetPackId)}/export`)
+    if (!resp.ok) {
+      let message = '导出卡片包失败'
+      try {
+        const data = await resp.json()
+        message = data?.detail || message
+      } catch {
+        message = await resp.text() || message
+      }
+      throw new Error(message)
+    }
+    return await resp.json() as Record<string, any>
+  }, [])
+
   const refreshModelConfig = useCallback(async () => {
     setConfigLoading(true)
     setConfigError('')
@@ -1290,6 +1313,8 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     previewCard,
     importCardPack,
     scanCardPacks,
+    getCardPackTemplate,
+    exportCardPack,
     syncLocalTools,
     syncMcpTools,
     modelConfig,

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
-import { Bot, Brain, ChevronRight, Cpu, LayoutDashboard, Plus, RefreshCw, Save, SendHorizontal, Sparkles, Trash2, Upload, Wrench } from 'lucide-react'
+import { Bot, Brain, ChevronRight, Cpu, Download, LayoutDashboard, Plus, RefreshCw, Save, SendHorizontal, Sparkles, Trash2, Upload, Wrench } from 'lucide-react'
 import ChatWorkspace from './ChatWorkspace'
 import CardRenderer from './CardRenderer'
 import { MODEL_VENDOR_TYPE_OPTIONS, getModelVendorPreset, usePlatformConsole, type AgentApiDocsRecord, type AgentApiKeyRecord, type McpProbeResult, type ModelCatalogModel, type ModelCatalogVendor, type ModelProbeResult, type UsageTrendPoint, type VendorUsageStats } from '../hooks/usePlatformConsole'
@@ -665,6 +665,32 @@ function safeJsonObject(text: string, fallback: Record<string, any> = {}) {
   }
 }
 
+function resolveCardPackMeta(metadata: Record<string, any> | null | undefined) {
+  const payload = isRecord(metadata) ? metadata : {}
+  let pack_id = String(payload.card_pack_id || '').trim()
+  const managedBy = String(payload.managed_by || '').trim()
+  if (!pack_id && managedBy.toLowerCase().startsWith('card_pack::')) {
+    pack_id = managedBy.slice('card_pack::'.length).trim()
+  }
+  return {
+    pack_id,
+    display_name: String(payload.card_pack_display_name || payload.pack_display_name || '').trim(),
+    version: String(payload.card_pack_version || payload.version || '').trim(),
+  }
+}
+
+function downloadJsonFile(filename: string, payload: Record<string, any>) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
 export default function PlatformWorkbenchShell({ chat, profile, info, error }: Props) {
   const consoleData = usePlatformConsole(info)
   const [view, setView] = useState<ViewKey>('overview')
@@ -763,6 +789,54 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
     () => selectedCardCollection ? cardTemplateGallery.filter(item => item.template.collection_id === selectedCardCollection.collection_id) : cardTemplateGallery,
     [cardTemplateGallery, selectedCardCollection],
   )
+  const importedCardPacks = useMemo(() => {
+    const packMap = new Map<string, {
+      pack_id: string
+      display_name: string
+      version: string
+      collection_ids: Set<string>
+      template_ids: Set<string>
+    }>()
+    const ensurePack = (pack_id: string, display_name: string, version: string) => {
+      const current = packMap.get(pack_id)
+      if (current) {
+        if (display_name && (!current.display_name || current.display_name === current.pack_id)) current.display_name = display_name
+        if (version && !current.version) current.version = version
+        return current
+      }
+      const next = {
+        pack_id,
+        display_name: display_name || pack_id,
+        version,
+        collection_ids: new Set<string>(),
+        template_ids: new Set<string>(),
+      }
+      packMap.set(pack_id, next)
+      return next
+    }
+    for (const item of cardCollections) {
+      const meta = resolveCardPackMeta(item.metadata)
+      if (!meta.pack_id) continue
+      const pack = ensurePack(meta.pack_id, meta.display_name, meta.version)
+      pack.collection_ids.add(item.collection_id)
+    }
+    for (const item of cardTemplates) {
+      const meta = resolveCardPackMeta(item.metadata)
+      if (!meta.pack_id) continue
+      const pack = ensurePack(meta.pack_id, meta.display_name, meta.version)
+      if (item.collection_id) pack.collection_ids.add(item.collection_id)
+      pack.template_ids.add(item.template_id)
+    }
+    return Array.from(packMap.values())
+      .map(item => ({
+        pack_id: item.pack_id,
+        display_name: item.display_name || item.pack_id,
+        version: item.version || '1.0',
+        collections: item.collection_ids.size,
+        templates: item.template_ids.size,
+      }))
+      .sort((a, b) => a.display_name.localeCompare(b.display_name, 'zh-CN'))
+  }, [cardCollections, cardTemplates])
   const selectedTemplatePreviewCard = useMemo(
     () => buildTemplatePreviewCard({
       template_id: cardTemplateForm.template_id,
@@ -1639,6 +1713,45 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
     await consoleData.syncMcpTools()
   }
 
+  const toggleMcpServerEnabled = async (targetServerName: string) => {
+    const targetServer = consoleData.mcpConfig.servers[targetServerName]
+    if (!targetServer) throw new Error('MCP 服务不存在')
+    const nextEnabled = !targetServer.enabled
+    const saved = await consoleData.saveMcpConfig({
+      enabled: consoleData.mcpConfig.enabled,
+      tool_timeout_seconds: consoleData.mcpConfig.tool_timeout_seconds,
+      servers: {
+        ...consoleData.mcpConfig.servers,
+        [targetServerName]: {
+          ...targetServer,
+          enabled: nextEnabled,
+        },
+      },
+    })
+    if (saved.enabled && nextEnabled) {
+      await consoleData.syncMcpTools()
+    }
+  }
+
+  const toggleToolEnabled = async (targetToolName: string) => {
+    const targetTool = tools.find(item => item.tool_name === targetToolName)
+    if (!targetTool) throw new Error('工具不存在')
+    await consoleData.saveTool({
+      ...targetTool,
+      enabled: !targetTool.enabled,
+    })
+  }
+
+  const downloadCardPackTemplateFile = async () => {
+    const payload = await consoleData.getCardPackTemplate()
+    downloadJsonFile('card_pack_import_template.json', payload)
+  }
+
+  const exportExistingCardPack = async (packId: string) => {
+    const payload = await consoleData.exportCardPack(packId)
+    downloadJsonFile(`${packId || 'card_pack'}.json`, payload)
+  }
+
   const buildMcpServerConfig = () => {
     const existing = ((mcpServerName && mcpServerName !== NEW_KEY ? consoleData.mcpConfig.servers[mcpServerName] : undefined) || selectedMcpServer || {}) as Record<string, any>
     return {
@@ -2214,6 +2327,8 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
             {mcpToolGroups.map(group => {
               const expanded = isToolServerExpanded(group.name)
               const active = mcpServerName === group.name
+              const serverConfig = consoleData.mcpConfig.servers[group.name]
+              const serverEnabled = Boolean(serverConfig?.enabled)
               return (
                 <div key={group.name} className={cx('rounded-[26px] border p-5 transition', active ? 'border-emerald-200 bg-emerald-50/40 shadow-[0_18px_48px_rgba(16,185,129,0.10)]' : 'border-slate-200 bg-[#fbfefd]')}>
                   <div className="flex items-start justify-between gap-3">
@@ -2222,6 +2337,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
                       <div className="mt-1 text-sm text-slate-500">{group.transport || '未声明 transport'} · {formatInteger(group.tools.length)} 个工具</div>
                     </div>
                     <div className="flex gap-2">
+                      <button onClick={() => void runAction(async () => { await toggleMcpServerEnabled(group.name) }, `MCP 服务已${serverEnabled ? '关闭' : '启用'}：${group.name}`)} className={cx('rounded-2xl border px-3 py-2 text-xs transition', serverEnabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-200 hover:text-emerald-600')}>{serverEnabled ? '已启用' : '已停用'}</button>
                       <button onClick={() => toggleToolServerExpanded(group.name)} className="rounded-full border border-slate-200 bg-white p-2 text-slate-500 transition hover:border-emerald-200 hover:text-emerald-600">
                         <ChevronRight size={14} className={cx('transition', expanded && 'rotate-90')} />
                       </button>
@@ -2231,6 +2347,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
 
                   <div className="mt-4 flex flex-wrap gap-2 text-[11px] text-slate-500">
                     <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">全局开关 {mcpMetaDraft.enabled ? '启用' : '关闭'}</span>
+                    <span className={cx('rounded-full border px-2.5 py-1', serverEnabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-500')}>服务 {serverEnabled ? '启用' : '关闭'}</span>
                     <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">超时 {formatInteger(mcpMetaDraft.tool_timeout_seconds)} 秒</span>
                   </div>
 
@@ -2246,6 +2363,8 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] text-slate-600">{item.scope}</span>
                               {item.supports_card && <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] text-emerald-700">card</span>}
+                              {!item.enabled && <span className="rounded-full bg-slate-200 px-2 py-1 text-[10px] text-slate-600">已停用</span>}
+                              <button onClick={() => void runAction(async () => { await toggleToolEnabled(item.tool_name) }, `工具已${item.enabled ? '停用' : '启用'}：${item.display_name || item.tool_name}`)} className={cx('rounded-xl border px-3 py-1.5 text-xs transition', item.enabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-200 hover:text-emerald-600')}>{item.enabled ? '已启用' : '已停用'}</button>
                               <button onClick={() => openToolEditor(item.tool_name)} className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">编辑工具</button>
                             </div>
                           </div>
@@ -2350,11 +2469,34 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
               e.target.value = ''
             }} />
             <button onClick={() => document.getElementById('card-pack-file-input')?.click()} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><Upload size={14} />导入卡片包</button>
+            <button onClick={() => void runAction(async () => { await downloadCardPackTemplateFile() }, '卡片包导入模板已下载')} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><Download size={14} />下载导入模板</button>
             <button onClick={() => void runAction(async () => {
               const results = await consoleData.scanCardPacks()
               if (!results.length) throw new Error('card_packs/ 目录不存在或无 JSON 文件')
             }, '卡片包目录已扫描')} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><RefreshCw size={14} />扫描目录</button>
           </div>
+        </div>
+        <div className="mt-4 border-t border-slate-200 pt-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-slate-900">已导入卡片包</div>
+              <div className="mt-1 text-xs text-slate-500">下载模板可用于制作新卡片包；已导入的卡片包支持一键导出 JSON。</div>
+            </div>
+          </div>
+          {importedCardPacks.length ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {importedCardPacks.map(item => (
+                <button key={item.pack_id} onClick={() => void runAction(async () => { await exportExistingCardPack(item.pack_id) }, `卡片包已导出：${item.display_name}`)} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">
+                  <Download size={12} />
+                  <span>{item.display_name}</span>
+                  <span className="text-slate-400">{item.version}</span>
+                  <span className="text-slate-400">{item.templates} 模板 / {item.collections} 卡片集</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-3 rounded-2xl border border-dashed border-slate-200 px-4 py-4 text-sm text-slate-500">当前还没有识别到已导入的卡片包；导入后可在这里直接导出。</div>
+          )}
         </div>
       </Surface>
 

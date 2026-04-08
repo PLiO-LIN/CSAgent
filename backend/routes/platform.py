@@ -12,6 +12,7 @@ from card.runtime import build_template_card
 from db.engine import get_db
 from platform_registry import (
     CardPackResult,
+    CardPackSummary,
     PlatformAgentRecord,
     PlatformCardCollectionRecord,
     PlatformCardTemplateRecord,
@@ -22,11 +23,14 @@ from platform_registry import (
     delete_card_template_record,
     delete_skill_record,
     delete_tool_record,
+    export_card_pack_payload,
     get_agent_record,
+    get_card_pack_template_payload,
     get_card_collection_record,
     get_card_template_record,
     get_registry_snapshot,
     import_card_pack,
+    list_card_pack_summaries,
     list_agent_records,
     list_card_collection_records,
     list_card_template_records,
@@ -259,6 +263,16 @@ async def preview_card(payload: CardPreviewReq):
     return build_template_card(payload.template, payload.source_payload, payload.binding)
 
 
+@router.get("/card-packs")
+async def list_card_packs_api():
+    return [item.model_dump() for item in list_card_pack_summaries()]
+
+
+@router.get("/card-packs/template")
+async def card_pack_template_api():
+    return get_card_pack_template_payload()
+
+
 @router.post("/card-packs/import")
 async def import_card_pack_api(payload: dict[str, Any], db: AsyncSession = Depends(get_db)):
     result = await import_card_pack(db, payload)
@@ -269,6 +283,16 @@ async def import_card_pack_api(payload: dict[str, Any], db: AsyncSession = Depen
 async def scan_card_packs_api(db: AsyncSession = Depends(get_db)):
     results = await scan_card_packs_directory(db)
     return [r.model_dump() for r in results]
+
+
+@router.get("/card-packs/{pack_id}/export")
+async def export_card_pack_api(pack_id: str):
+    try:
+        return export_card_pack_payload(pack_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Card pack not found: {pack_id}") from exc
 
 
 @router.get("/skills")
