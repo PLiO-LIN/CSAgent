@@ -367,9 +367,9 @@ function formatCurrency(value: number) {
 }
 
 function formatCostPerM(value: number | null | undefined) {
-  if (value === null || value === undefined) return 'Not set'
+  if (value === null || value === undefined) return '未设置'
   const next = Number(value)
-  if (!Number.isFinite(next)) return 'Not set'
+  if (!Number.isFinite(next)) return '未设置'
   return `¥${next.toFixed(next >= 10 ? 2 : next >= 1 ? 3 : 4)}/M`
 }
 
@@ -409,7 +409,7 @@ function MetricCard({ label, value, hint, accent = 'emerald' }: { label: string;
     amber: 'from-amber-500/10 via-amber-50 to-white text-amber-700',
   }[accent]
   return (
-    <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_12px_40px_rgba(15,23,42,0.04)]">
+    <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_12px_40px_rgba(15,23,42,0.04)] transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_18px_50px_rgba(15,23,42,0.08)]">
       <div className={cx('inline-flex rounded-full bg-gradient-to-r px-3 py-1 text-[11px] font-medium', accentClass)}>{label}</div>
       <div className="mt-4 text-3xl font-semibold tracking-tight text-slate-900">{value}</div>
       {hint && <div className="mt-2 text-sm text-slate-500">{hint}</div>}
@@ -420,16 +420,16 @@ function MetricCard({ label, value, hint, accent = 'emerald' }: { label: string;
 function RingMeter({ label, value, helper, color = '#10b981' }: { label: string; value: number; helper?: string; color?: string }) {
   const progress = clamp(value)
   return (
-    <div className="rounded-[24px] border border-slate-200 bg-white p-5">
+    <div className="rounded-[24px] border border-slate-200 bg-white p-5 transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_18px_50px_rgba(15,23,42,0.08)]" title={`${label}：${formatPercent(progress)}`}>
       <div className="text-sm font-medium text-slate-900">{label}</div>
       <div className="mt-5 flex items-center gap-5">
-        <div className="relative h-24 w-24 rounded-full" style={{ background: `conic-gradient(${color} ${progress * 3.6}deg, #e2e8f0 0deg)` }}>
+        <div className="relative h-24 w-24 rounded-full transition-transform duration-300 hover:scale-105" style={{ background: `conic-gradient(${color} ${progress * 3.6}deg, #e2e8f0 0deg)` }}>
           <div className="absolute inset-[10px] rounded-full bg-white" />
           <div className="absolute inset-0 flex items-center justify-center text-sm font-semibold text-slate-900">{formatPercent(progress)}</div>
         </div>
         <div className="min-w-0">
           <div className="text-sm text-slate-600">当前调用表现</div>
-          {helper && <div className="mt-1 text-xs leading-5 text-slate-500">{helper}</div>}
+          {helper && <div className="mt-1 text-xs text-slate-500">{helper}</div>}
         </div>
       </div>
     </div>
@@ -476,9 +476,12 @@ function AreaTrendChart({
   const linePath = buildLinePath(coordinates)
   const areaPath = buildAreaPath(coordinates, height)
   const peakValue = Math.max(...values, 0)
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
+  const activePoint = hoveredIndex !== null ? coordinates[hoveredIndex] : null
+  const activeMeta = hoveredIndex !== null ? points[hoveredIndex] : null
 
   return (
-    <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_60px_rgba(15,23,42,0.05)]">
+    <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_60px_rgba(15,23,42,0.05)] transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_22px_70px_rgba(15,23,42,0.08)]">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="text-lg font-semibold text-slate-900">{title}</div>
@@ -486,19 +489,32 @@ function AreaTrendChart({
         </div>
         <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600">峰值 {valueFormatter(peakValue)}</div>
       </div>
-      <div className="mt-6">
-        <svg viewBox={`0 0 ${width} ${height}`} className="h-56 w-full overflow-visible">
+      <div className="relative mt-6">
+        {activePoint && activeMeta && (
+          <div
+            className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-[calc(100%+10px)] rounded-2xl border border-slate-200 bg-white/95 px-3 py-2 text-xs shadow-[0_12px_36px_rgba(15,23,42,0.10)] backdrop-blur"
+            style={{ left: `${(activePoint.x / width) * 100}%`, top: `${(activePoint.y / height) * 100}%` }}
+          >
+            <div className="font-medium text-slate-900">{activeMeta.label || activeMeta.date}</div>
+            <div className="mt-1 text-slate-500">{valueFormatter(activePoint.value)}</div>
+          </div>
+        )}
+        <svg viewBox={`0 0 ${width} ${height}`} className="h-56 w-full overflow-visible transition-transform duration-500 hover:scale-[1.01]" onMouseLeave={() => setHoveredIndex(null)}>
           <defs>
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={stroke} stopOpacity="0.24" />
               <stop offset="100%" stopColor={stroke} stopOpacity="0.03" />
             </linearGradient>
           </defs>
-          <path d={areaPath} fill={`url(#${gradientId})`} />
-          <path d={linePath} fill="none" stroke={stroke} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+          <path d={areaPath} fill={`url(#${gradientId})`} className="transition-opacity duration-300" />
+          <path d={linePath} fill="none" stroke={stroke} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="transition-all duration-300" />
+          {activePoint && (
+            <line x1={activePoint.x} y1={18} x2={activePoint.x} y2={height - 18} stroke={stroke} strokeOpacity="0.18" strokeDasharray="4 4" />
+          )}
           {coordinates.map((point, index) => (
-            <g key={`${points[index]?.date || index}-point`}>
-              <circle cx={point.x} cy={point.y} r="4" fill="white" stroke={stroke} strokeWidth="2" />
+            <g key={`${points[index]?.date || index}-point`} onMouseEnter={() => setHoveredIndex(index)}>
+              <circle cx={point.x} cy={point.y} r="14" fill="transparent" />
+              <circle cx={point.x} cy={point.y} r={hoveredIndex === index ? 6 : 4} fill="white" stroke={stroke} strokeWidth="2" className="transition-all duration-200" />
             </g>
           ))}
         </svg>
@@ -531,7 +547,7 @@ function RankingList({
         {items.map(item => {
           const active = item.key === highlightKey
           return (
-            <div key={item.key} className={cx('rounded-2xl border p-4 transition', active ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-200 bg-[#fbfefd]')}>
+            <div key={item.key} title={`${item.label}：${valueFormatter(item.value)}`} className={cx('rounded-2xl border p-4 transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_14px_36px_rgba(15,23,42,0.06)]', active ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-200 bg-[#fbfefd]')}>
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium text-slate-900">{item.label}</div>
@@ -556,23 +572,23 @@ function TokenSplitCard({ inputTokens, outputTokens, title, subtitle }: { inputT
   const inputRatio = total > 0 ? (inputTokens / total) * 100 : 0
   const outputRatio = total > 0 ? (outputTokens / total) * 100 : 0
   return (
-    <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_60px_rgba(15,23,42,0.05)]">
+    <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_60px_rgba(15,23,42,0.05)] transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_22px_70px_rgba(15,23,42,0.08)]">
       <div className="text-lg font-semibold text-slate-900">{title}</div>
       {subtitle && <div className="mt-1 text-sm text-slate-500">{subtitle}</div>}
       <div className="mt-6 overflow-hidden rounded-full bg-slate-100">
         <div className="flex h-3 w-full overflow-hidden rounded-full">
-          <div className="bg-emerald-400" style={{ width: `${clamp(inputRatio, 0, 100)}%` }} />
-          <div className="bg-sky-400" style={{ width: `${clamp(outputRatio, 0, 100)}%` }} />
+          <div title={`输入：${formatTokenMetric(inputTokens)}（${formatPercent(inputRatio)}）`} className="bg-emerald-400 transition-all duration-500" style={{ width: `${clamp(inputRatio, 0, 100)}%` }} />
+          <div title={`输出：${formatTokenMetric(outputTokens)}（${formatPercent(outputRatio)}）`} className="bg-sky-400 transition-all duration-500" style={{ width: `${clamp(outputRatio, 0, 100)}%` }} />
         </div>
       </div>
       <div className="mt-5 grid gap-3 md:grid-cols-2">
         <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4">
-          <div className="text-xs uppercase tracking-[0.16em] text-emerald-700">Input</div>
+          <div className="text-xs uppercase tracking-[0.16em] text-emerald-700">输入</div>
           <div className="mt-2 text-2xl font-semibold text-slate-900">{formatTokenMetric(inputTokens)}</div>
           <div className="mt-1 text-xs text-slate-500">{formatPercent(inputRatio)} · {formatTokenMetric(inputTokens)}</div>
         </div>
         <div className="rounded-2xl border border-sky-100 bg-sky-50/60 p-4">
-          <div className="text-xs uppercase tracking-[0.16em] text-sky-700">Output</div>
+          <div className="text-xs uppercase tracking-[0.16em] text-sky-700">输出</div>
           <div className="mt-2 text-2xl font-semibold text-slate-900">{formatTokenMetric(outputTokens)}</div>
           <div className="mt-1 text-xs text-slate-500">{formatPercent(outputRatio)} · {formatTokenMetric(outputTokens)}</div>
         </div>
@@ -2343,7 +2359,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
       </Surface>
 
       {cardsMode === 'templates' ? (
-        <div className="grid gap-5 xl:grid-cols-[280px_320px_minmax(0,1fr)]">
+        <div className="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
           <ResourceList
             title="卡片集"
             items={cardCollections}
@@ -2356,99 +2372,60 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
             newLabel="新建卡片集"
           />
 
-          <Surface className="p-4">
-            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-semibold text-slate-900">模板列表</div>
-                <div className="mt-1 text-xs text-slate-500">{selectedCardCollection?.display_name || '未选择卡片集'} · {cardTemplateCountByCollection.get(selectedCardCollection?.collection_id || '') || 0} 个模板</div>
+          <div className="space-y-5">
+            <Surface className="p-4">
+              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">模板列表</div>
+                  <div className="mt-1 text-xs text-slate-500">{selectedCardCollection?.display_name || '未选择卡片集'} · {cardTemplateCountByCollection.get(selectedCardCollection?.collection_id || '') || 0} 个模板</div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={() => openCardCollectionDialog(selectedCardCollection?.collection_id || NEW_KEY)} disabled={!selectedCardCollection} className="rounded-2xl border border-slate-200 px-3 py-2 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600 disabled:opacity-40">编辑卡片集</button>
+                  <button onClick={() => openCardTemplateDialog(NEW_KEY)} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-3 py-2 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><Plus size={12} />新增模板</button>
+                </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <button onClick={() => openCardCollectionDialog(selectedCardCollection?.collection_id || NEW_KEY)} disabled={!selectedCardCollection} className="rounded-2xl border border-slate-200 px-3 py-2 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600 disabled:opacity-40">编辑卡片集</button>
-                <button onClick={() => openCardTemplateDialog(NEW_KEY)} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-3 py-2 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><Plus size={12} />新增模板</button>
-              </div>
-            </div>
 
-            {filteredCardTemplateGallery.length ? (
-              <div className="space-y-2">
-                {filteredCardTemplateGallery.map(item => {
-                  const active = cardTemplateId === item.template.template_id
-                  return (
-                    <button key={item.template.template_id} onClick={() => setCardTemplateId(item.template.template_id)} className={cx('w-full rounded-[22px] border p-4 text-left transition', active ? 'border-emerald-300 bg-emerald-50/50 shadow-[0_12px_36px_rgba(16,185,129,0.10)]' : 'border-slate-200 bg-[#fbfefd] hover:border-emerald-200 hover:bg-emerald-50/30')}>
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-slate-900">{item.template.display_name || item.template.template_id}</div>
-                          <div className="mt-1 truncate text-xs text-slate-500">{item.template.template_id}</div>
+              {filteredCardTemplateGallery.length ? (
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {filteredCardTemplateGallery.map(item => {
+                    const active = cardTemplateId === item.template.template_id
+                    return (
+                      <button key={item.template.template_id} onClick={() => openCardTemplateDialog(item.template.template_id)} className={cx('w-full rounded-[24px] border p-4 text-left transition', active ? 'border-emerald-300 bg-emerald-50/50 shadow-[0_12px_36px_rgba(16,185,129,0.10)]' : 'border-slate-200 bg-[#fbfefd] hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-emerald-50/30 hover:shadow-[0_16px_40px_rgba(16,185,129,0.08)]')}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold text-slate-900">{item.template.display_name || item.template.template_id}</div>
+                            <div className="mt-1 truncate text-xs text-slate-500">{item.template.template_id}</div>
+                          </div>
+                          {!item.template.enabled && <span className="rounded-full bg-slate-200 px-2.5 py-1 text-[11px] text-slate-600">已停用</span>}
                         </div>
-                        {!item.template.enabled && <span className="rounded-full bg-slate-200 px-2.5 py-1 text-[11px] text-slate-600">已停用</span>}
-                      </div>
-                      <div className="mt-3 text-xs leading-5 text-slate-500">{item.template.summary || '未填写模板摘要。'}</div>
-                      <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-500">
-                        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">{item.template.template_type || 'info_detail'}</span>
-                        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">{item.template.renderer_key || '未配置渲染器'}</span>
-                      </div>
-                    </button>
-                  )
-                })}
+                        <div className="mt-3 text-xs leading-5 text-slate-500">{item.template.summary || '未填写模板摘要。'}</div>
+                        <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-500">
+                          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">{item.template.template_type || 'info_detail'}</span>
+                          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">{item.template.renderer_key || '未配置渲染器'}</span>
+                        </div>
+                        <div className="mt-4 rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 text-[11px] text-slate-500">点击查看卡片样式、JSON 和编辑配置</div>
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">当前卡片集还没有模板，点击上方新建。</div>
+              )}
+            </Surface>
+
+            <Surface className="p-6">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-lg font-semibold text-slate-900">{selectedCardCollection?.display_name || '卡片集详情'}</div>
+                  <div className="mt-1 text-sm text-slate-500">{selectedCardCollection?.summary || '先选择卡片集，再从上方卡片列表中点击具体卡片模板，弹窗查看样式、样例 JSON 和编辑配置。'}</div>
+                </div>
+                <div className="flex flex-wrap gap-2 text-[11px] text-slate-500">
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1">模板 {cardTemplateCountByCollection.get(selectedCardCollection?.collection_id || '') || 0} 个</span>
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1">点击卡片即可弹窗查看</span>
+                </div>
               </div>
-            ) : (
-              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">当前卡片集还没有模板，点击上方新建。</div>
-            )}
-          </Surface>
-
-          {selectedCardTemplate && cardTemplateId !== NEW_KEY ? (
-            <div className="space-y-5">
-              <Surface className="p-6">
-                <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div className="text-lg font-semibold text-slate-900">{selectedCardTemplate.display_name || selectedCardTemplate.template_id}</div>
-                    <div className="mt-1 text-sm text-slate-500">{selectedCardTemplate.summary || '点击编辑后可维护模板摘要、Schema 与预览配置。'}</div>
-                    <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-500">
-                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">{selectedCardTemplate.template_id}</span>
-                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">{selectedCardTemplate.template_type || 'info_detail'}</span>
-                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">{selectedCardCollection?.display_name || selectedCardTemplate.collection_id || 'default'}</span>
-                      {!selectedCardTemplate.enabled && <span className="rounded-full bg-slate-200 px-2.5 py-1 text-slate-600">已停用</span>}
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button onClick={() => openCardTemplateDialog(selectedCardTemplate.template_id)} className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">编辑模板</button>
-                    <button onClick={() => openCardTemplateDialog(NEW_KEY)} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><Plus size={14} />新增模板</button>
-                  </div>
-                </div>
-
-                <div className="rounded-[28px] border border-slate-200 bg-[#fbfefd] p-4">
-                  <CardRenderer card={selectedTemplateCard} onInspectPath={setCardInspectPath} />
-                </div>
-                <div className="mt-4 space-y-2">
-                  <div className="text-sm font-medium text-slate-900">样例 JSON</div>
-                  {renderHighlightedJson(selectedTemplatePreviewPayload, cardInspectPath)}
-                </div>
-              </Surface>
-
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-                <Surface className="p-6">
-                  <div className="mb-4 text-lg font-semibold text-slate-900">模板结构</div>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <Field label="模板 ID"><Input readOnly value={cardTemplateForm.template_id} /></Field>
-                    <Field label="渲染器 Key"><Input readOnly value={cardTemplateForm.renderer_key} /></Field>
-                    <Field label="数据 Schema"><Area rows={12} readOnly value={cardTemplateForm.data_schema_text} /></Field>
-                    <Field label="UI 模板"><Area rows={12} readOnly value={cardTemplateForm.ui_schema_text} /></Field>
-                    <Field label="动作 Schema"><Area rows={12} readOnly value={cardTemplateForm.action_schema_text} /></Field>
-                    <Field label="样例 Payload"><Area rows={12} readOnly value={cardTemplateForm.sample_payload_text} /></Field>
-                  </div>
-                </Surface>
-
-                <Surface className="p-6">
-                  <div className="mb-4 text-lg font-semibold text-slate-900">模板元数据</div>
-                  <div className="grid gap-4">
-                    <Field label="摘要"><Area rows={4} readOnly value={cardTemplateForm.summary} /></Field>
-                    <Field label="附加信息"><Area rows={18} readOnly value={cardTemplateForm.metadata_text} /></Field>
-                  </div>
-                </Surface>
-              </div>
-            </div>
-          ) : (
-            <Surface className="p-6 text-sm text-slate-500">在中间选择一个模板后，这里会展示卡片样式、Schema 与元数据详情。</Surface>
-          )}
+            </Surface>
+          </div>
         </div>
       ) : (
         <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
@@ -2533,7 +2510,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <div className="text-sm font-semibold text-slate-900">历史会话</div>
-              <div className="mt-1 text-xs text-slate-500">{activeAgentSessionOwner ? 'Only sessions for the current agent are shown here.' : 'Open chat from an agent detail page first, then review that agent\'s history here.'}</div>
+              <div className="mt-1 text-xs text-slate-500">{activeAgentSessionOwner ? '这里只展示当前智能体的历史会话。' : '请先从智能体详情进入对话，再在这里查看该智能体的历史记录。'}</div>
             </div>
             <button onClick={() => void consoleData.refreshSessions()} className="rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">刷新</button>
           </div>
@@ -2595,11 +2572,11 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
 
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,#f6fbfa_0%,#f3faf7_42%,#eef7f3_100%)] text-slate-800">
-      <div className="mx-auto flex min-h-screen max-w-[1680px] gap-5 px-4 py-5 sm:px-6">
-        <aside className="hidden w-[228px] flex-col rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_60px_rgba(15,23,42,0.04)] xl:flex">
+      <div className="mx-auto flex min-h-screen max-w-[1680px] items-start gap-5 px-4 py-5 sm:px-6">
+        <aside className="hidden w-[228px] self-start rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_60px_rgba(15,23,42,0.04)] xl:sticky xl:top-5 xl:flex xl:max-h-[calc(100vh-40px)] xl:flex-col xl:overflow-auto">
           <div className="px-2 py-3">
             <div className="text-xs uppercase tracking-[0.28em] text-emerald-600">CSAgent</div>
-            <div className="mt-2 text-2xl font-semibold text-slate-900">骞冲彴鎺у埗鍙</div>
+            <div className="mt-2 text-2xl font-semibold text-slate-900">平台控制台</div>
           </div>
           <div className="mt-4 space-y-2">
             {NAV_ITEMS.map(item => {
@@ -2619,10 +2596,10 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
           <Surface className="mb-5 px-6 py-5">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
-                <div className="text-sm text-slate-500">{profile.ui.app_name || 'CSAgent Platform'}</div>
-                <div className="mt-1 text-3xl font-semibold text-slate-900">{view === 'agent-chat' ? (activeAgentForChat?.name || 'Agent Chat') : NAV_ITEMS.find(item => item.key === view)?.label || 'Overview'}</div>
+                <div className="text-sm text-slate-500">{profile.ui.app_name || 'CSAgent 平台'}</div>
+                <div className="mt-1 text-3xl font-semibold text-slate-900">{view === 'agent-chat' ? (activeAgentForChat?.name || '智能体对话') : NAV_ITEMS.find(item => item.key === view)?.label || '概览'}</div>
               </div>
-              <button onClick={() => void runAction(async () => { await Promise.all([consoleData.refreshModelConfig(), consoleData.refreshUsageStats(), consoleData.refreshMcpConfig(), consoleData.refreshSessions(), consoleData.refreshRegistry()]) }, '鎺у埗鍙版暟鎹凡鍒锋柊')} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><RefreshCw size={14} />鍒锋柊</button>
+              <button onClick={() => void runAction(async () => { await Promise.all([consoleData.refreshModelConfig(), consoleData.refreshUsageStats(), consoleData.refreshMcpConfig(), consoleData.refreshSessions(), consoleData.refreshRegistry()]) }, '控制台数据已刷新')} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600"><RefreshCw size={14} />刷新</button>
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2 xl:hidden">
