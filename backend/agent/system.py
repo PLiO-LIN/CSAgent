@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from typing import Any
 from framework_profile import load_framework_profile, render_long_term_memory
@@ -18,7 +19,7 @@ def build_system(
 ) -> list[str]:
     profile = load_framework_profile()
     resolved_system_core = str(system_core_prompt or profile.prompts.system_core).strip()
-    resolved_persona = str(persona_prompt or "").strip()
+    resolved_persona = _render_agent_variable_placeholders(str(persona_prompt or ""), agent_variable_values or {}).strip()
     resolved_skill_guide = str(skill_guide_prompt or profile.prompts.skill_guide).strip()
     parts = [
         _section("Layer 0: Service Rules", resolved_system_core),
@@ -77,6 +78,24 @@ def _build_agent_variable_context(agent_variables: list[dict[str, Any]], agent_v
         return ""
     lines.append("- 上述变量由平台或上层业务显式注入；若工具参数已绑定这些变量，参数由系统自动填写，禁止自行编造或改写。")
     return "\n".join(lines)
+
+
+def _render_agent_variable_placeholders(text: str, agent_variable_values: dict[str, Any]) -> str:
+    source = str(text or "")
+    values = dict(agent_variable_values or {})
+    if not source or not values:
+        return source
+
+    def replace(match: re.Match[str]) -> str:
+        key = str(match.group(1) or "").strip()
+        if not key:
+            return match.group(0)
+        value = values.get(key)
+        if value in (None, "", [], {}):
+            return match.group(0)
+        return str(value)
+
+    return re.sub(r"\{\{\s*([a-zA-Z0-9_\-.]+)\s*\}\}", replace, source)
 
 
 def _build_runtime_controls(runtime_controls: dict, agent_state: dict) -> str:

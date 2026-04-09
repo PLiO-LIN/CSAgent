@@ -168,17 +168,25 @@ CARD_TEMPLATES = [
                 {"type": "item_list", "path": "$.items"},
             ],
         },
-        action_schema={
-            "actions": [
-                {"label": "我要订购", "contentTemplate": "帮我订购 {{title}}"},
-            ],
-        },
+        action_schema={"actions": []},
         sample_payload={
             "title": "套餐推荐",
             "summary": "为您推荐 3 款套餐",
             "items": [
-                {"title": "5G畅享129元套餐", "summary": "30GB流量 + 500分钟通话", "badges": ["129元/月"]},
-                {"title": "云宽带美好家299元套餐", "summary": "150GB流量 + 1500分钟 + 1000M宽带", "badges": ["299元/月", "家庭"]},
+                {
+                    "title": "5G畅享129元套餐",
+                    "offer_id": "PKG_5G_129",
+                    "summary": "30GB流量 + 500分钟通话",
+                    "badges": ["129元/月"],
+                    "actions": [{"label": "订购此套餐", "contentTemplate": "帮我订购 {{title}}，产品ID 是 {{offer_id}}", "displayTemplate": "订购 {{title}}"}],
+                },
+                {
+                    "title": "云宽带美好家299元套餐",
+                    "offer_id": "PKG_FAMILY_299",
+                    "summary": "150GB流量 + 1500分钟 + 1000M宽带",
+                    "badges": ["299元/月", "家庭"],
+                    "actions": [{"label": "订购此套餐", "contentTemplate": "帮我订购 {{title}}，产品ID 是 {{offer_id}}", "displayTemplate": "订购 {{title}}"}],
+                },
             ],
         },
         metadata={"managed_by": SEED_TAG},

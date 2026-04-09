@@ -158,10 +158,15 @@ def estimate_tokens(messages: list[dict]) -> int:
     return total // 2
 
 
-def apply_budget_governance(messages: list[dict]) -> tuple[list[dict], dict]:
-    budget_tokens = settings.context_budget_tokens if settings.context_budget_tokens > 0 else 0
-    reserve_tokens = settings.context_output_reserve_tokens if settings.context_output_reserve_tokens > 0 else 0
-    thin_trigger_tokens = settings.context_local_thin_trigger_tokens if settings.context_local_thin_trigger_tokens > 0 else 0
+def apply_budget_governance(
+    messages: list[dict],
+    budget_tokens: int = 0,
+    reserve_tokens: int = 0,
+    thin_trigger_tokens: int = 0,
+) -> tuple[list[dict], dict]:
+    budget_tokens = budget_tokens if budget_tokens > 0 else (settings.context_budget_tokens if settings.context_budget_tokens > 0 else 0)
+    reserve_tokens = reserve_tokens if reserve_tokens > 0 else (settings.context_output_reserve_tokens if settings.context_output_reserve_tokens > 0 else 0)
+    thin_trigger_tokens = thin_trigger_tokens if thin_trigger_tokens > 0 else (settings.context_local_thin_trigger_tokens if settings.context_local_thin_trigger_tokens > 0 else 0)
     available_tokens = max(budget_tokens - reserve_tokens, 0) if budget_tokens > 0 else 0
     tokens_before = estimate_tokens(messages)
     governed = list(messages)

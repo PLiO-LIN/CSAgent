@@ -53,6 +53,9 @@ SCHEMA_PATCHES: dict[str, dict[str, str]] = {
         "latency_ms": "INTEGER NOT NULL DEFAULT 0",
         "created_at": "REAL NOT NULL DEFAULT 0",
     },
+    "platform_card_template": {
+        "collection_id": "VARCHAR(128) NOT NULL DEFAULT 'default'",
+    },
 }
 
 
@@ -66,7 +69,7 @@ class Base(DeclarativeBase):
 
 async def init_db():
     async with engine.begin() as conn:
-        from db.models import SessionModel, MessageModel, PartModel, LLMRequestModel, AgentEventLogModel, PlatformToolModel, PlatformSkillModel, PlatformAgentModel, PlatformCardTemplateModel  # noqa: F401
+        from db.models import SessionModel, MessageModel, PartModel, LLMRequestModel, AgentEventLogModel, PlatformToolModel, PlatformSkillModel, PlatformAgentModel, PlatformAgentApiKeyModel, PlatformCardCollectionModel, PlatformCardTemplateModel  # noqa: F401
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_schema_patches)
 

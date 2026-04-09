@@ -49,8 +49,13 @@ export default function TemplateCardRenderer({ card, onAction, onInspectPath }: 
   const title = String(card?.title || card?.display_name || card?.template_id || '模板卡片').trim()
   const summary = String(card?.summary || '').trim()
   const uiSchema = isPlainObject(card?.ui_schema) ? card.ui_schema : {}
-  const blocks = Array.isArray(uiSchema.blocks) ? uiSchema.blocks.filter(isPlainObject) : []
+  const blocks: Record<string, any>[] = Array.isArray(uiSchema.blocks) ? uiSchema.blocks.filter(isPlainObject) : []
   const rootActions = normalizeActionList(card?.actions)
+  const hasItemLevelActions = blocks.some(block => {
+    if (String(block.type || '').trim() !== 'item_list') return false
+    const items = toArray(resolveTemplatePath(payload, block.path || '$.items'))
+    return items.some(item => normalizeActionList(isPlainObject(item) ? item.actions : []).length > 0)
+  })
 
   const renderBlock = (block: Record<string, any>, index: number) => {
     const type = String(block.type || '').trim()
@@ -246,7 +251,7 @@ export default function TemplateCardRenderer({ card, onAction, onInspectPath }: 
             {displayScalar(payload)}
           </div>
         )}
-        {rootActions.length > 0 && actionButtons(rootActions, onAction, payload)}
+        {rootActions.length > 0 && !hasItemLevelActions && actionButtons(rootActions, onAction, payload)}
       </div>
     </div>
   )

@@ -561,8 +561,11 @@ def recommend_packages_tool(phone: str, need_type: str = "") -> dict[str, Any]:
     for offer in result.get("recommendations", []):
         if not isinstance(offer, dict):
             continue
+        offer_id = str(offer.get("offerId") or "").strip()
+        offer_name = str(offer.get("offerName") or "推荐套餐")
         items.append({
-            "title": str(offer.get("offerName") or "推荐套餐"),
+            "title": offer_name,
+            "offer_id": offer_id,
             "summary": "；".join(
                 part for part in [
                     offer.get("data"),
@@ -575,6 +578,13 @@ def recommend_packages_tool(phone: str, need_type: str = "") -> dict[str, Any]:
                 badge for badge in [offer.get("monthlyFee"), offer.get("suitableFor")]
                 if str(badge or "").strip() and str(badge).strip() != "—"
             ],
+            "actions": [
+                {
+                    "label": "订购此套餐",
+                    "contentTemplate": "帮我订购 {{title}}，产品ID 是 {{offer_id}}",
+                    "displayTemplate": "订购 {{title}}",
+                }
+            ] if offer_id else [],
         })
     return {
         **result,

@@ -32,7 +32,7 @@ from runtime_scope import reset_runtime_scope, set_runtime_scope
 from tool.registry import all_tools, get_tool, parse_args
 from skill.base import get_skill, render_skill_catalog, Skill
 from db import crud
-from config import settings
+from config import resolve_llm_selection, settings
 
 logger = logging.getLogger(__name__)
 
@@ -498,6 +498,8 @@ async def run(
     runtime_tool_arg_bindings = _normalize_agent_runtime_fields(agent_runtime.tool_arg_bindings)
     agent_variable_values = _resolve_agent_variable_values(runtime_agent_variables, session_metadata)
     selected_agent_id = agent_runtime.agent_id
+    resolved_model_selection = resolve_llm_selection(agent_runtime.model_settings)
+    model_max_context_tokens = int(resolved_model_selection.get("max_context_tokens") or 0) if resolved_model_selection.get("max_context_tokens") else 0
     if provider is None or agent_runtime.model_settings:
         from provider import factory
 
@@ -538,7 +540,14 @@ async def run(
             )
             db_messages = await crud.get_messages(db, session_id)
             raw_messages = rebuild(db_messages)
-            messages, context_budget = apply_budget_governance(raw_messages)
+            messages, context_budget = apply_budget_governance(raw_messages, budget_tokens=model_max_context_tokens)
+            if model_max_context_tokens > 0:
+                context_budget = {
+                    **context_budget,
+                    "model_max_context_tokens": model_max_context_tokens,
+                    "model_vendor_id": str(resolved_model_selection.get("vendor_id") or ""),
+                    "model_id": str(resolved_model_selection.get("model_id") or ""),
+                }
             last_user = _latest_user_message(db_messages)
 
             state_dirty = False
@@ -631,7 +640,7 @@ async def run(
                     },
                 )
 
-            should_compact = needs_compaction(raw_messages) or bool(context_budget.get("should_compact"))
+            should_compact = needs_compaction(raw_messages, context_limit=model_max_context_tokens) or bool(context_budget.get("should_compact"))
             breaker_open = int((((agent_state.get("runtime_state") or {}).get("compaction_failures", 0)) or 0)) >= 2
             if should_compact and not breaker_open:
                 yield Event("status", text="正在压缩对话历史...")
@@ -713,7 +722,14 @@ async def run(
                     compacted = True
                     db_messages = await crud.get_messages(db, session_id)
                     raw_messages = rebuild(db_messages)
-                    messages, context_budget = apply_budget_governance(raw_messages)
+                    messages, context_budget = apply_budget_governance(raw_messages, budget_tokens=model_max_context_tokens)
+                    if model_max_context_tokens > 0:
+                        context_budget = {
+                            **context_budget,
+                            "model_max_context_tokens": model_max_context_tokens,
+                            "model_vendor_id": str(resolved_model_selection.get("vendor_id") or ""),
+                            "model_id": str(resolved_model_selection.get("model_id") or ""),
+                        }
                     update_context_budget(agent_state, context_budget)
                     await _persist_agent_state(db, session_id, agent_state, phone=phone)
                     await _log_agent_event(
@@ -1030,6 +1046,7 @@ async def run(
             fingerprint = ""
             policy_reason_code = ""
             emitted_card_ids: list[str] = []
+            emitted_cards: list[tuple[str, dict[str, Any]]] = []
 
             if not entry:
                 tool_result_status = "unknown_tool"
@@ -1343,7 +1360,8 @@ async def run(
                         if card:
                             cid = _card_id(name, exec_args)
                             emitted_card_ids.append(cid)
-                            result_text += f"\n\n_card_id: {cid}"
+                            emitted_cards.append((cid, card))
+                            result_text += f"\n\n[[CARD:{cid}]]"
                             yield Event("card", card_id=cid, card=card, tool_call_id=tc_id)
                         if isinstance(cards, list):
                             for idx, item in enumerate(cards):
@@ -1358,7 +1376,8 @@ async def run(
                                 default_suffix = f"{payload.get('type', 'card')}_{idx + 1}"
                                 cid = _card_id(name, exec_args, suffix or default_suffix)
                                 emitted_card_ids.append(cid)
-                                result_text += f"\n\n_card_id: {cid}"
+                                emitted_cards.append((cid, payload))
+                                result_text += f"\n\n[[CARD:{cid}]]"
                                 yield Event("card", card_id=cid, card=payload, tool_call_id=tc_id)
                         await _log_agent_event(
                             db,
@@ -1388,6 +1407,7 @@ async def run(
                         yield Event("tool_result", tool=name, tool_call_id=tc_id, text=result_text)
 
             if assistant_msg is not None:
+                next_part_index = len(assistant_msg.parts)
                 await crud.add_part(
                     db,
                     mid=assistant_msg.id,
@@ -1404,8 +1424,26 @@ async def run(
                         "policy_reason_code": policy_reason_code,
                         "card_ids": emitted_card_ids,
                     },
-                    index=len(assistant_msg.parts),
+                    index=next_part_index,
                 )
+                next_part_index += 1
+                for cid, payload in emitted_cards:
+                    await crud.add_part(
+                        db,
+                        mid=assistant_msg.id,
+                        sid=session_id,
+                        ptype="card",
+                        content="",
+                        metadata={
+                            "llm_request_id": llm_req.id,
+                            "tool_call_id": tc_id,
+                            "tool_name": name,
+                            "card_id": cid,
+                            "card": payload,
+                        },
+                        index=next_part_index,
+                    )
+                    next_part_index += 1
 
             await _log_agent_event(
                 db,

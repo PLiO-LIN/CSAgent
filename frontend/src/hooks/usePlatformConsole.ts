@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FrameworkInfo } from './useFrameworkProfile'
 
 export interface ModelCatalogModel {
@@ -8,6 +8,7 @@ export interface ModelCatalogModel {
   enabled: boolean
   input_cost_per_mtokens: number | null
   output_cost_per_mtokens: number | null
+  max_context_tokens: number | null
 }
 
 export interface ModelCatalogVendor {
@@ -298,6 +299,7 @@ const DEFAULT_MODEL_VENDORS: ModelCatalogVendor[] = [
         enabled: true,
         input_cost_per_mtokens: null,
         output_cost_per_mtokens: null,
+        max_context_tokens: null,
       },
     ],
   },
@@ -315,6 +317,7 @@ const DEFAULT_MODEL_VENDORS: ModelCatalogVendor[] = [
         enabled: true,
         input_cost_per_mtokens: null,
         output_cost_per_mtokens: null,
+        max_context_tokens: null,
       },
     ],
   },
@@ -364,6 +367,13 @@ function normalizeOptionalNumber(value: unknown) {
   if (value === null || value === undefined || value === '') return null
   const next = Number(value)
   return Number.isFinite(next) ? next : null
+}
+
+function normalizeOptionalInteger(value: unknown) {
+  if (value === null || value === undefined || value === '') return null
+  const next = Number(value)
+  if (!Number.isFinite(next) || next <= 0) return null
+  return Math.round(next)
 }
 
 function createEmptyUsageCounter(): UsageCounter {
@@ -491,6 +501,7 @@ function normalizeModelConfig(raw?: Partial<ModelConfig> | null): ModelConfig {
               enabled: model?.enabled !== false,
               input_cost_per_mtokens: normalizeOptionalNumber(model?.input_cost_per_mtokens),
               output_cost_per_mtokens: normalizeOptionalNumber(model?.output_cost_per_mtokens),
+              max_context_tokens: normalizeOptionalInteger(model?.max_context_tokens),
             }
           })
           .filter((model): model is ModelCatalogModel => Boolean(model))
@@ -602,10 +613,15 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
   const [selectedSessionId, setSelectedSessionId] = useState('')
   const [sessionMessages, setSessionMessages] = useState<SessionMessageRecord[]>([])
   const [sessionMessagesLoading, setSessionMessagesLoading] = useState(false)
+  const selectedSessionIdRef = useRef('')
 
   useEffect(() => {
     setRegistryInfo(info || EMPTY_INFO)
   }, [info])
+
+  useEffect(() => {
+    selectedSessionIdRef.current = selectedSessionId
+  }, [selectedSessionId])
 
   const refreshRegistry = useCallback(async () => {
     setRegistryRefreshing(true)
@@ -825,20 +841,35 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     return await resp.json()
   }, [refreshRegistry])
 
-  const saveSkill = useCallback(async (payload: SkillRecord) => {
+  const saveSkill = useCallback(async (payload: SkillRecord, originalSkillName = '') => {
     const skillName = String(payload?.skill_name || '').trim()
+    const previousSkillName = String(originalSkillName || '').trim()
     if (!skillName) throw new Error('技能名称不能为空')
-    const exists = registryInfo.skills.some(item => item.skill_name === skillName)
-    const resp = await fetch(exists ? `/api/platform/skills/${encodeURIComponent(skillName)}` : '/api/platform/skills', {
+    const updateKey = previousSkillName || skillName
+    const exists = registryInfo.skills.some(item => item.skill_name === updateKey)
+    const resp = await fetch(exists ? `/api/platform/skills/${encodeURIComponent(updateKey)}` : '/api/platform/skills', {
       method: exists ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
-    if (!resp.ok) throw new Error('保存技能失败')
+    if (!resp.ok) {
+      let message = '保存技能失败'
+      try {
+        const data = await resp.json()
+        message = data?.detail || message
+      } catch {
+        message = await resp.text() || message
+      }
+      throw new Error(message)
+    }
     const data = await resp.json()
     setRegistryInfo(prev => ({
       ...prev,
-      skills: upsertByKey(prev.skills, 'skill_name', data),
+      skills: upsertByKey(removeByKey(prev.skills, 'skill_name', updateKey), 'skill_name', data),
+      agents: prev.agents.map(agent => ({
+        ...agent,
+        skill_names: (agent.skill_names || []).map(item => item === updateKey ? data.skill_name : item),
+      })),
     }))
     return data as SkillRecord
   }, [registryInfo.skills])
@@ -1188,24 +1219,6 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
     return await resp.json()
   }, [refreshMcpConfig, refreshRegistry])
 
-  const refreshSessions = useCallback(async () => {
-    setSessionsLoading(true)
-    setSessionsError('')
-    try {
-      const resp = await fetch('/api/sessions')
-      if (!resp.ok) throw new Error('读取会话记录失败')
-      const data = await resp.json()
-      const next = Array.isArray(data) ? data : []
-      setSessions(next)
-      setSelectedSessionId(prev => prev || next[0]?.id || '')
-    } catch (err: any) {
-      setSessionsError(err?.message || '读取会话记录失败')
-      setSessions([])
-    } finally {
-      setSessionsLoading(false)
-    }
-  }, [])
-
   const loadSessionMessages = useCallback(async (sessionId: string) => {
     const sid = String(sessionId || '').trim()
     if (!sid) {
@@ -1222,6 +1235,35 @@ export function usePlatformConsole(info: FrameworkInfo | null) {
       setSessionMessagesLoading(false)
     }
   }, [])
+
+  const refreshSessions = useCallback(async (preferredSessionId = '') => {
+    setSessionsLoading(true)
+    setSessionsError('')
+    try {
+      const resp = await fetch('/api/sessions')
+      if (!resp.ok) throw new Error('读取会话记录失败')
+      const data = await resp.json()
+      const next = Array.isArray(data) ? data : []
+      const currentSelectedId = selectedSessionIdRef.current
+      const preferredId = String(preferredSessionId || '').trim()
+      const nextSelectedId = (preferredId && next.some(item => item.id === preferredId))
+        ? preferredId
+        : ((currentSelectedId && next.some(item => item.id === currentSelectedId)) ? currentSelectedId : (next[0]?.id || ''))
+      setSessions(next)
+      setSelectedSessionId(nextSelectedId)
+      if (!nextSelectedId) {
+        setSessionMessages([])
+      } else if (nextSelectedId === currentSelectedId) {
+        await loadSessionMessages(nextSelectedId)
+      }
+    } catch (err: any) {
+      setSessionsError(err?.message || '读取会话记录失败')
+      setSessions([])
+      setSessionMessages([])
+    } finally {
+      setSessionsLoading(false)
+    }
+  }, [loadSessionMessages])
 
   const selectSession = useCallback(async (sessionId: string) => {
     const sid = String(sessionId || '').trim()

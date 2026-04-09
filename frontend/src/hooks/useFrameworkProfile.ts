@@ -98,8 +98,16 @@ export interface FrameworkInfo {
     memory_config: Record<string, any>
     metadata: Record<string, any>
   }>
+  card_collections: Array<{
+    collection_id: string
+    display_name: string
+    summary: string
+    enabled: boolean
+    metadata: Record<string, any>
+  }>
   card_templates: Array<{
     template_id: string
+    collection_id: string
     display_name: string
     summary: string
     enabled: boolean

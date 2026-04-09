@@ -183,10 +183,37 @@ class PlatformAgentModel(Base):
     updated_at: Mapped[float] = mapped_column(Float, default=lambda: datetime.now().timestamp())
 
 
+class PlatformAgentApiKeyModel(Base):
+    __tablename__ = "platform_agent_api_key"
+
+    key_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(128), index=True)
+    name: Mapped[str] = mapped_column(String(256), default="")
+    key_prefix: Mapped[str] = mapped_column(String(32), default="")
+    key_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_used_at: Mapped[float] = mapped_column(Float, default=0)
+    created_at: Mapped[float] = mapped_column(Float, default=lambda: datetime.now().timestamp())
+    updated_at: Mapped[float] = mapped_column(Float, default=lambda: datetime.now().timestamp())
+
+
+class PlatformCardCollectionModel(Base):
+    __tablename__ = "platform_card_collection"
+
+    collection_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(256), default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSON, default=None)
+    created_at: Mapped[float] = mapped_column(Float, default=lambda: datetime.now().timestamp())
+    updated_at: Mapped[float] = mapped_column(Float, default=lambda: datetime.now().timestamp())
+
+
 class PlatformCardTemplateModel(Base):
     __tablename__ = "platform_card_template"
 
     template_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    collection_id: Mapped[str] = mapped_column(String(128), default="default", index=True)
     display_name: Mapped[str] = mapped_column(String(256), default="")
     summary: Mapped[str] = mapped_column(Text, default="")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)

@@ -32,6 +32,35 @@ def _coerce_text_dict(value: Any) -> dict[str, str]:
     return result
 
 
+def _coerce_optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        value = text
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_optional_positive_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        value = text
+    try:
+        next_value = int(float(value))
+    except (TypeError, ValueError):
+        return None
+    return next_value if next_value > 0 else None
+
+
 class McpServerSettings(BaseModel):
     enabled: bool = True
     transport: str = "stdio"
@@ -121,23 +150,37 @@ class LlmModelSettings(BaseModel):
     display_name: str = ""
     chat_model: str = ""
     enabled: bool = True
+    input_cost_per_mtokens: float | None = None
+    output_cost_per_mtokens: float | None = None
+    max_context_tokens: int | None = None
 
     @field_validator("model_id", "display_name", "chat_model", mode="before")
     @classmethod
     def normalize_text_field(cls, value: Any) -> str:
         return str(value or "").strip()
 
+    @field_validator("input_cost_per_mtokens", "output_cost_per_mtokens", mode="before")
+    @classmethod
+    def normalize_optional_cost(cls, value: Any) -> float | None:
+        return _coerce_optional_float(value)
+
+    @field_validator("max_context_tokens", mode="before")
+    @classmethod
+    def normalize_max_context_tokens(cls, value: Any) -> int | None:
+        return _coerce_optional_positive_int(value)
+
     model_config = {"extra": "ignore"}
 
 
 class LlmVendorSettings(BaseModel):
     vendor_id: str = ""
+    vendor_type: str = ""
     display_name: str = ""
     base_url: str = ""
     enabled: bool = True
     models: list[LlmModelSettings] = Field(default_factory=list)
 
-    @field_validator("vendor_id", "display_name", "base_url", mode="before")
+    @field_validator("vendor_id", "vendor_type", "display_name", "base_url", mode="before")
     @classmethod
     def normalize_text_field(cls, value: Any) -> str:
         return str(value or "").strip()
@@ -145,16 +188,69 @@ class LlmVendorSettings(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+def _normalize_llm_vendor_type(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text or text == "default":
+        return "siliconflow"
+    if text == "openai_comletion":
+        return "openai_completion"
+    if text in {"aliyun", "dashscope", "qwen"}:
+        return "aliyun_bailian"
+    return text
+
+
 def _normalize_llm_vendor_id(value: Any) -> str:
-    text = str(value or "").strip()
-    return "siliconflow" if text == "default" else text
+    text = str(value or "").strip().lower()
+    if not text or text == "default":
+        return "siliconflow"
+    if text == "openai_comletion":
+        return "openai_completion"
+    if text in {"aliyun", "dashscope", "qwen"}:
+        return "aliyun_bailian"
+    return text
+
+
+def _llm_vendor_presets() -> dict[str, dict[str, str]]:
+    return {
+        "siliconflow": {
+            "vendor_id": "siliconflow",
+            "vendor_type": "siliconflow",
+            "display_name": "硅基流动",
+            "base_url": "https://api.siliconflow.cn/v1",
+        },
+        "openai_completion": {
+            "vendor_id": "openai_completion",
+            "vendor_type": "openai_completion",
+            "display_name": "OpenAI Completion",
+            "base_url": "https://api.openai.com/v1",
+        },
+        "aliyun_bailian": {
+            "vendor_id": "aliyun_bailian",
+            "vendor_type": "aliyun_bailian",
+            "display_name": "阿里云百炼",
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        },
+        "deepseek": {
+            "vendor_id": "deepseek",
+            "vendor_type": "deepseek",
+            "display_name": "DeepSeek",
+            "base_url": "https://api.deepseek.com",
+        },
+    }
+
+
+def _get_llm_vendor_preset(vendor_type_or_id: Any) -> dict[str, str] | None:
+    presets = _llm_vendor_presets()
+    normalized_type = _normalize_llm_vendor_type(vendor_type_or_id)
+    return presets.get(normalized_type) or presets.get(_normalize_llm_vendor_id(vendor_type_or_id))
 
 
 def _default_llm_vendors() -> list[LlmVendorSettings]:
     return [
         LlmVendorSettings(
             vendor_id="siliconflow",
-            display_name="轨迹流动",
+            vendor_type="siliconflow",
+            display_name="硅基流动",
             base_url="https://api.siliconflow.cn/v1",
             enabled=True,
             models=[
@@ -168,7 +264,8 @@ def _default_llm_vendors() -> list[LlmVendorSettings]:
         ),
         LlmVendorSettings(
             vendor_id="openai_completion",
-            display_name="openai_completion",
+            vendor_type="openai_completion",
+            display_name="OpenAI Completion",
             base_url="https://api.openai.com/v1",
             enabled=True,
             models=[
@@ -201,6 +298,9 @@ def _merge_llm_models(base_models: list[LlmModelSettings], incoming_models: list
         if item.chat_model:
             existing.chat_model = item.chat_model
         existing.enabled = item.enabled
+        existing.input_cost_per_mtokens = item.input_cost_per_mtokens
+        existing.output_cost_per_mtokens = item.output_cost_per_mtokens
+        existing.max_context_tokens = item.max_context_tokens
     return list(merged.values())
 
 
@@ -237,17 +337,28 @@ def _ensure_default_llm_vendors(raw_vendors: Any) -> list[LlmVendorSettings]:
     }
     for item in _coerce_llm_vendor_settings(raw_vendors):
         vendor = item.model_copy(deep=True)
-        vendor.vendor_id = _normalize_llm_vendor_id(vendor.vendor_id)
+        preset = _get_llm_vendor_preset(vendor.vendor_type or vendor.vendor_id)
+        vendor.vendor_type = _normalize_llm_vendor_type(vendor.vendor_type or vendor.vendor_id)
+        if not vendor.vendor_id:
+            vendor.vendor_id = str((preset or {}).get("vendor_id") or vendor.vendor_type or "").strip()
+        vendor.vendor_id = _normalize_llm_vendor_id(vendor.vendor_id or vendor.vendor_type)
         if not vendor.vendor_id:
             continue
-        if vendor.vendor_id == "siliconflow" and (not vendor.display_name or vendor.display_name in {"默认厂商", "default"}):
-            vendor.display_name = "轨迹流动"
+        if not vendor.vendor_type:
+            vendor.vendor_type = _normalize_llm_vendor_type(vendor.vendor_id)
+        preset = _get_llm_vendor_preset(vendor.vendor_type or vendor.vendor_id)
+        if preset and (not vendor.display_name or vendor.display_name in {"默认厂商", "default", vendor.vendor_id, "轨迹流动"}):
+            vendor.display_name = str(preset.get("display_name") or vendor.vendor_id)
         elif not vendor.display_name:
             vendor.display_name = vendor.vendor_id
+        if preset and not vendor.base_url:
+            vendor.base_url = str(preset.get("base_url") or "").strip()
         existing = merged.get(vendor.vendor_id)
         if existing is None:
             merged[vendor.vendor_id] = vendor
             continue
+        if vendor.vendor_type:
+            existing.vendor_type = vendor.vendor_type
         if vendor.display_name:
             existing.display_name = vendor.display_name
         if vendor.base_url:
@@ -619,10 +730,12 @@ def get_llm_catalog(source: Settings | None = None) -> tuple[list[LlmVendorSetti
     if current_base_url or current_chat_model:
         vendor = next((item for item in vendors if item.vendor_id == active_vendor), None)
         if vendor is None:
+            preset = _get_llm_vendor_preset(active_vendor)
             vendor = LlmVendorSettings(
-                vendor_id=active_vendor or "default",
-                display_name=active_vendor or "默认厂商",
-                base_url=current_base_url,
+                vendor_id=_normalize_llm_vendor_id(active_vendor or "default"),
+                vendor_type=_normalize_llm_vendor_type(active_vendor or "default"),
+                display_name=str((preset or {}).get("display_name") or active_vendor or "默认厂商"),
+                base_url=current_base_url or str((preset or {}).get("base_url") or ""),
                 enabled=True,
                 models=[],
             )
@@ -650,7 +763,7 @@ def get_llm_catalog(source: Settings | None = None) -> tuple[list[LlmVendorSetti
     return vendors, active_vendor, active_model
 
 
-def resolve_llm_selection(model_settings: dict[str, Any] | None = None, source: Settings | None = None) -> dict[str, str]:
+def resolve_llm_selection(model_settings: dict[str, Any] | None = None, source: Settings | None = None) -> dict[str, Any]:
     current = source or settings
     settings_map = dict(model_settings or {})
     vendors_override = settings_map.get("vendors")
@@ -677,6 +790,9 @@ def resolve_llm_selection(model_settings: dict[str, Any] | None = None, source: 
 
     base_url = str(settings_map.get("base_url") or (vendor.base_url if vendor else "") or current.base_url or "").strip()
     chat_model = str(settings_map.get("chat_model") or (model.chat_model if model else "") or current.chat_model or "").strip()
+    max_context_tokens = _coerce_optional_positive_int(settings_map.get("max_context_tokens"))
+    if max_context_tokens is None and model is not None:
+        max_context_tokens = model.max_context_tokens
 
     return {
         "vendor_id": selected_vendor_id,
@@ -684,6 +800,7 @@ def resolve_llm_selection(model_settings: dict[str, Any] | None = None, source: 
         "base_url": base_url,
         "chat_model": chat_model,
         "api_key": str(current.api_key or "").strip(),
+        "max_context_tokens": max_context_tokens,
     }
 
 

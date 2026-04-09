@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
+import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type Ref, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 import { Bot, Brain, ChevronRight, Cpu, Download, LayoutDashboard, Plus, RefreshCw, Save, SendHorizontal, Sparkles, Trash2, Upload, Wrench } from 'lucide-react'
 import ChatWorkspace from './ChatWorkspace'
 import CardRenderer from './CardRenderer'
-import { MODEL_VENDOR_TYPE_OPTIONS, getModelVendorPreset, usePlatformConsole, type AgentApiDocsRecord, type AgentApiKeyRecord, type McpProbeResult, type ModelCatalogModel, type ModelCatalogVendor, type ModelProbeResult, type UsageTrendPoint, type VendorUsageStats } from '../hooks/usePlatformConsole'
+import { MODEL_VENDOR_TYPE_OPTIONS, getModelVendorPreset, usePlatformConsole, type AgentApiDocsRecord, type AgentApiKeyRecord, type McpProbeResult, type ModelCatalogModel, type ModelCatalogVendor, type ModelProbeResult, type SessionMessageRecord, type UsageTrendPoint, type VendorUsageStats } from '../hooks/usePlatformConsole'
 import { type UseChatController } from '../hooks/useChat'
 import { type FrameworkInfo, type FrameworkProfile } from '../hooks/useFrameworkProfile'
 import { resolveChatActionInput } from '../lib/chatDisplay'
@@ -86,7 +86,13 @@ function createVendorCreateDraft(vendorType = MODEL_VENDOR_TYPE_OPTIONS[0]?.vend
   }
 }
 
-const EMPTY_MODEL_CREATE_DRAFT = { model_id: '', display_name: '', chat_model: '', enabled: true, input_cost_per_mtokens: null as number | null, output_cost_per_mtokens: null as number | null }
+const EMPTY_MODEL_CREATE_DRAFT = { model_id: '', display_name: '', chat_model: '', enabled: true, input_cost_per_mtokens: null as number | null, output_cost_per_mtokens: null as number | null, max_context_tokens: null as number | null }
+
+const SILICONFLOW_ICON_URL = new URL('../../icons/硅基流动.svg', import.meta.url).href
+const OPENAI_ICON_URL = new URL('../../icons/openai.svg', import.meta.url).href
+const TONGYI_ICON_URL = new URL('../../icons/Tongyi-Qianwen.svg', import.meta.url).href
+const DEEPSEEK_ICON_URL = new URL('../../icons/deepseek-copy-copy.svg', import.meta.url).href
+const AGENT_ICON_URL = new URL('../../icons/icon_智能体.svg', import.meta.url).href
 
 function cx(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(' ')
@@ -111,12 +117,38 @@ function getVendorVisualMeta(vendorTypeOrId: unknown) {
   return { mark: 'SF', gradient: 'from-emerald-400 via-teal-500 to-cyan-500', ring: 'ring-emerald-100', text: 'text-emerald-700' }
 }
 
+function getVendorIconSrc(vendorTypeOrId: unknown) {
+  const vendorType = getModelVendorPreset(vendorTypeOrId)?.vendor_type || String(vendorTypeOrId || 'siliconflow')
+  if (vendorType === 'openai_completion') return OPENAI_ICON_URL
+  if (vendorType === 'aliyun_bailian') return TONGYI_ICON_URL
+  if (vendorType === 'deepseek') return DEEPSEEK_ICON_URL
+  if (vendorType === 'siliconflow') return SILICONFLOW_ICON_URL
+  return ''
+}
+
 function VendorLogo({ vendorTypeOrId, size = 'md' }: { vendorTypeOrId: unknown; size?: 'sm' | 'md' | 'lg' }) {
   const meta = getVendorVisualMeta(vendorTypeOrId)
+  const iconSrc = getVendorIconSrc(vendorTypeOrId)
   const sizeClass = size === 'lg' ? 'h-14 w-14 text-base' : size === 'sm' ? 'h-9 w-9 text-[11px]' : 'h-11 w-11 text-xs'
+  if (iconSrc) {
+    return (
+      <span className={cx('inline-flex items-center justify-center overflow-hidden rounded-2xl bg-white shadow-[0_12px_30px_rgba(15,23,42,0.12)] ring-4', meta.ring, sizeClass)}>
+        <img src={iconSrc} alt={String(getModelVendorPreset(vendorTypeOrId)?.display_name || vendorTypeOrId || 'vendor')} className="h-[72%] w-[72%] object-contain" />
+      </span>
+    )
+  }
   return (
     <span className={cx('inline-flex items-center justify-center rounded-2xl bg-gradient-to-br font-semibold tracking-[0.08em] text-white shadow-[0_12px_30px_rgba(15,23,42,0.12)] ring-4', meta.gradient, meta.ring, sizeClass)}>
       {meta.mark}
+    </span>
+  )
+}
+
+function AgentAvatar({ size = 'md' }: { size?: 'sm' | 'md' }) {
+  const sizeClass = size === 'sm' ? 'h-9 w-9' : 'h-11 w-11'
+  return (
+    <span className={cx('inline-flex items-center justify-center overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-[0_12px_30px_rgba(15,23,42,0.08)]', sizeClass)}>
+      <img src={AGENT_ICON_URL} alt="智能体" className="h-[72%] w-[72%] object-contain" />
     </span>
   )
 }
@@ -156,9 +188,10 @@ function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
   )
 }
 
-function Area(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+function Area({ inputRef, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement> & { inputRef?: Ref<HTMLTextAreaElement> }) {
   return (
     <textarea
+      ref={inputRef}
       {...props}
       className={cx('w-full rounded-2xl border border-slate-200 bg-[#f8fcfb] px-4 py-3 text-sm leading-6 text-slate-800 outline-none transition focus:border-emerald-300 focus:bg-white', props.className)}
     />
@@ -356,13 +389,61 @@ function createMcpServerDraft(name: string, record?: Record<string, any> | null)
 }
 
 function resolveActiveModelDraft(draft: { active_vendor: string; active_model: string; vendors: ModelCatalogVendor[] }) {
-  const vendor = draft.vendors.find(item => item.vendor_id === draft.active_vendor) || draft.vendors[0] || null
-  const model = vendor?.models.find(item => item.model_id === draft.active_model) || vendor?.models[0] || null
+  const vendor = getPreferredModelVendors(draft.vendors).find(item => item.vendor_id === draft.active_vendor) || getPreferredModelVendors(draft.vendors)[0] || null
+  const model = getPreferredVendorModels(vendor).find(item => item.model_id === draft.active_model) || getPreferredVendorModels(vendor)[0] || null
   return {
     vendor,
     model,
     base_url: vendor?.base_url || '',
     chat_model: model?.chat_model || '',
+  }
+}
+
+function getPreferredVendorModels(vendor: ModelCatalogVendor | null | undefined) {
+  const enabledModels = (vendor?.models || []).filter(item => item.enabled !== false)
+  return enabledModels.length ? enabledModels : [...(vendor?.models || [])]
+}
+
+function getPreferredModelVendors(vendors: ModelCatalogVendor[]) {
+  const enabledVendors = (vendors || []).filter(item => item.enabled !== false)
+  const selectable = enabledVendors.filter(item => getPreferredVendorModels(item).length > 0)
+  if (selectable.length) return selectable
+  if (enabledVendors.length) return enabledVendors
+  return [...(vendors || [])]
+}
+
+function resolveModelSelection(vendors: ModelCatalogVendor[], preferredVendorId = '', preferredModelId = '', fallbackVendorId = '', fallbackModelId = '') {
+  const vendorPool = getPreferredModelVendors(vendors)
+  const vendor = vendorPool.find(item => item.vendor_id === preferredVendorId)
+    || vendorPool.find(item => item.vendor_id === fallbackVendorId)
+    || vendorPool[0]
+    || null
+  const models = getPreferredVendorModels(vendor)
+  const model = models.find(item => item.model_id === preferredModelId)
+    || (vendor?.vendor_id === fallbackVendorId ? models.find(item => item.model_id === fallbackModelId) : null)
+    || models[0]
+    || null
+  return {
+    vendor,
+    models,
+    model,
+    vendor_id: vendor?.vendor_id || '',
+    model_id: model?.model_id || '',
+  }
+}
+
+function findPromptVariableSlashToken(text: string, caretPosition: number) {
+  const safeCaret = Math.max(0, Math.min(Number.isFinite(caretPosition) ? caretPosition : text.length, text.length))
+  const prefix = text.slice(0, safeCaret)
+  const match = prefix.match(/(?:^|[\s([{（])\/([a-zA-Z0-9_-]*)$/)
+  if (!match) return null
+  const fullMatch = String(match[0] || '')
+  const slashOffset = fullMatch.lastIndexOf('/')
+  if (slashOffset < 0) return null
+  return {
+    start: safeCaret - fullMatch.length + slashOffset,
+    end: safeCaret,
+    query: String(match[1] || ''),
   }
 }
 
@@ -402,6 +483,14 @@ function parseNullableNumberInput(value: string) {
   if (!text) return null
   const next = Number(text)
   return Number.isFinite(next) ? next : null
+}
+
+function parseNullableIntegerInput(value: string) {
+  const text = String(value || '').trim()
+  if (!text) return null
+  const next = Number(text)
+  if (!Number.isFinite(next) || next <= 0) return null
+  return Math.round(next)
 }
 
 function formatCompactMetric(value: number) {
@@ -803,6 +892,9 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
   const [skillGenerating, setSkillGenerating] = useState(false)
   const [skillGenerateStatus, setSkillGenerateStatus] = useState('')
   const skillGenerateAbortRef = useRef<AbortController | null>(null)
+  const previousChatLoadingRef = useRef(chat.loading)
+  const agentPromptInputRef = useRef<HTMLTextAreaElement | null>(null)
+  const [agentPromptSlash, setAgentPromptSlash] = useState<{ start: number; end: number; query: string } | null>(null)
   const [cardCollectionForm, setCardCollectionForm] = useState(createCardCollectionForm())
   const [cardTemplateForm, setCardTemplateForm] = useState(createCardTemplateForm())
   const [cardToolDraft, setCardToolDraft] = useState({ summary: '', card_type: '', card_binding_text: '{}' })
@@ -823,6 +915,10 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
   const [agentApiKeyName, setAgentApiKeyName] = useState('')
   const [agentApiCreatedKey, setAgentApiCreatedKey] = useState('')
   const [agentApiLoading, setAgentApiLoading] = useState(false)
+  const [agentSessionSearch, setAgentSessionSearch] = useState('')
+  const [agentSessionMessageSearch, setAgentSessionMessageSearch] = useState('')
+  const [agentSessionRoleFilter, setAgentSessionRoleFilter] = useState('all')
+  const [agentSessionViewerOpen, setAgentSessionViewerOpen] = useState(false)
   const [vendorCreateDialogOpen, setVendorCreateDialogOpen] = useState(false)
   const [modelCreateDialogOpen, setModelCreateDialogOpen] = useState(false)
   const [modelEditorOpen, setModelEditorOpen] = useState(false)
@@ -932,9 +1028,21 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
     [cardTemplateForm.sample_payload_text],
   )
   const selectedVendor = modelDraft.vendors.find(item => item.vendor_id === vendorId) || modelDraft.vendors[0] || null
-  const selectedAgentVendor = consoleData.modelConfig.vendors.find(item => item.vendor_id === agentForm.model_vendor_id) || consoleData.modelConfig.vendors[0] || null
-  const skillGenerateVendor = consoleData.modelConfig.vendors.find(item => item.vendor_id === skillGenerateDraft.model_vendor_id) || consoleData.modelConfig.vendors[0] || null
-  const skillGenerateModel = skillGenerateVendor?.models.find(item => item.model_id === skillGenerateDraft.model_id) || skillGenerateVendor?.models[0] || null
+  const modelSelectionVendors = useMemo(() => getPreferredModelVendors(modelDraft.vendors), [modelDraft.vendors])
+  const activeModelSourceVendorId = modelDraft.active_vendor || consoleData.modelConfig.active_vendor
+  const activeModelSourceModelId = modelDraft.active_model || consoleData.modelConfig.active_model
+  const selectedAgentModelSelection = useMemo(
+    () => resolveModelSelection(modelSelectionVendors, agentForm.model_vendor_id, agentForm.model_id, activeModelSourceVendorId, activeModelSourceModelId),
+    [activeModelSourceModelId, activeModelSourceVendorId, agentForm.model_id, agentForm.model_vendor_id, modelSelectionVendors],
+  )
+  const selectedAgentModels = selectedAgentModelSelection.models
+  const skillGenerateSelection = useMemo(
+    () => resolveModelSelection(modelSelectionVendors, skillGenerateDraft.model_vendor_id, skillGenerateDraft.model_id, activeModelSourceVendorId, activeModelSourceModelId),
+    [activeModelSourceModelId, activeModelSourceVendorId, modelSelectionVendors, skillGenerateDraft.model_id, skillGenerateDraft.model_vendor_id],
+  )
+  const skillGenerateVendor = skillGenerateSelection.vendor
+  const skillGenerateModels = skillGenerateSelection.models
+  const skillGenerateModel = skillGenerateSelection.model
   const mcpServerNames = Object.keys(consoleData.mcpConfig.servers || {})
   const selectedMcpServer = mcpServerName === NEW_KEY ? null : consoleData.mcpConfig.servers[mcpServerName]
   const selectedToolServerName = useMemo(() => resolveMcpServerNameFromTool(selectedTool), [selectedTool])
@@ -1030,10 +1138,46 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
     () => activeAgentSessionOwner ? consoleData.sessions.filter(item => item.agent_id === activeAgentSessionOwner) : [],
     [consoleData.sessions, activeAgentSessionOwner],
   )
+  const filteredActiveAgentSessions = useMemo(() => {
+    const query = String(agentSessionSearch || '').trim().toLowerCase()
+    if (!query) return activeAgentSessions
+    return activeAgentSessions.filter(item => `${item.title || ''}\n${item.id}`.toLowerCase().includes(query))
+  }, [activeAgentSessions, agentSessionSearch])
+  const promptVariableOptions = useMemo(() => {
+    const query = String(agentPromptSlash?.query || '').trim().toLowerCase()
+    return (agentForm.agent_variables || [])
+      .map((item, index) => ({
+        ...item,
+        key: String(item.key || '').trim(),
+        label: String(item.label || item.key || '').trim(),
+        order: index,
+      }))
+      .filter(item => item.key)
+      .filter(item => !query || item.key.toLowerCase().includes(query) || item.label.toLowerCase().includes(query))
+      .sort((left, right) => Number(Boolean(right.inject_to_prompt)) - Number(Boolean(left.inject_to_prompt)) || left.order - right.order)
+  }, [agentForm.agent_variables, agentPromptSlash?.query])
   const selectedActiveAgentSession = useMemo(
     () => activeAgentSessions.find(item => item.id === consoleData.selectedSessionId) || null,
     [activeAgentSessions, consoleData.selectedSessionId],
   )
+  const sessionMessageRoleOptions = useMemo(
+    () => Array.from(new Set(consoleData.sessionMessages.map(item => String(item.role || '').trim()).filter(Boolean))),
+    [consoleData.sessionMessages],
+  )
+  const filteredSelectedSessionMessages = useMemo(() => {
+    const query = String(agentSessionMessageSearch || '').trim().toLowerCase()
+    return consoleData.sessionMessages.filter(item => {
+      if (agentSessionRoleFilter !== 'all' && item.role !== agentSessionRoleFilter) return false
+      if (!query) return true
+      const haystack = [
+        item.role,
+        item.agent,
+        item.model,
+        ...item.parts.map(part => `${part.type} ${part.content || ''}`),
+      ].join('\n').toLowerCase()
+      return haystack.includes(query)
+    })
+  }, [agentSessionMessageSearch, agentSessionRoleFilter, consoleData.sessionMessages])
   const agentSessionCountMap = useMemo(() => {
     const next = new Map<string, number>()
     for (const session of consoleData.sessions) {
@@ -1133,10 +1277,11 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
 
   useEffect(() => {
     const next = agentId === NEW_KEY ? createAgentForm() : createAgentForm(selectedAgent || undefined)
-    if (!next.model_vendor_id) next.model_vendor_id = consoleData.modelConfig.active_vendor
-    if (!next.model_id) next.model_id = consoleData.modelConfig.active_model
+    if (!next.model_vendor_id) next.model_vendor_id = activeModelSourceVendorId
+    if (!next.model_id) next.model_id = activeModelSourceModelId
     setAgentForm(next)
-  }, [agentId, selectedAgent, consoleData.modelConfig.active_vendor, consoleData.modelConfig.active_model])
+    setAgentPromptSlash(null)
+  }, [activeModelSourceModelId, activeModelSourceVendorId, agentId, selectedAgent])
 
   useEffect(() => {
     setToolForm(toolName === NEW_KEY ? createToolForm({ provider_type: 'protocol', scope: 'global', supports_card: false }) : createToolForm(selectedTool || undefined))
@@ -1147,17 +1292,22 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
   }, [skillName, selectedSkill])
 
   useEffect(() => {
-    const preferredVendor = consoleData.modelConfig.vendors.find(item => item.vendor_id === skillGenerateDraft.model_vendor_id)
-      || consoleData.modelConfig.vendors.find(item => item.vendor_id === consoleData.modelConfig.active_vendor)
-      || consoleData.modelConfig.vendors[0]
-      || null
-    const nextVendorId = preferredVendor?.vendor_id || ''
-    const nextModelId = preferredVendor?.models.some(item => item.model_id === skillGenerateDraft.model_id)
-      ? skillGenerateDraft.model_id
-      : (nextVendorId === consoleData.modelConfig.active_vendor ? consoleData.modelConfig.active_model : (preferredVendor?.models.find(item => item.enabled)?.model_id || preferredVendor?.models[0]?.model_id || ''))
+    const nextVendorId = skillGenerateSelection.vendor_id
+    const nextModelId = skillGenerateSelection.model_id
     if (skillGenerateDraft.model_vendor_id === nextVendorId && skillGenerateDraft.model_id === nextModelId) return
     setSkillGenerateDraft({ model_vendor_id: nextVendorId, model_id: nextModelId })
-  }, [consoleData.modelConfig.active_model, consoleData.modelConfig.active_vendor, consoleData.modelConfig.vendors, skillGenerateDraft.model_id, skillGenerateDraft.model_vendor_id])
+  }, [skillGenerateDraft.model_id, skillGenerateDraft.model_vendor_id, skillGenerateSelection.model_id, skillGenerateSelection.vendor_id])
+
+  useEffect(() => {
+    const nextVendorId = selectedAgentModelSelection.vendor_id
+    const nextModelId = selectedAgentModelSelection.model_id
+    if (agentForm.model_vendor_id === nextVendorId && agentForm.model_id === nextModelId) return
+    setAgentForm(prev => ({
+      ...prev,
+      model_vendor_id: nextVendorId,
+      model_id: nextModelId,
+    }))
+  }, [agentForm.model_id, agentForm.model_vendor_id, selectedAgentModelSelection.model_id, selectedAgentModelSelection.vendor_id])
 
   useEffect(() => {
     const nextCollectionId = cardCollections.some(item => item.collection_id === cardCollectionId)
@@ -1166,6 +1316,11 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
     if (nextCollectionId === cardCollectionId) return
     setCardCollectionId(nextCollectionId)
   }, [cardCollectionId, cardCollections])
+
+  useEffect(() => {
+    setAgentSessionMessageSearch('')
+    setAgentSessionRoleFilter('all')
+  }, [consoleData.selectedSessionId])
 
   useEffect(() => {
     const next = cardCollectionEditorId === NEW_KEY
@@ -1241,6 +1396,23 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
     if (skillGenerating) setSkillGenerating(false)
     if (skillGenerateStatus) setSkillGenerateStatus('')
   }, [skillEditorOpen, skillGenerating, skillGenerateStatus])
+
+  useEffect(() => {
+    if (view !== 'agent-chat') return
+    void consoleData.refreshSessions()
+  }, [agentId, consoleData.refreshSessions, view])
+
+  useEffect(() => {
+    const wasLoading = previousChatLoadingRef.current
+    previousChatLoadingRef.current = chat.loading
+    if (!wasLoading || chat.loading) return
+    void (async () => {
+      await Promise.all([
+        consoleData.refreshUsageStats(),
+        consoleData.refreshSessions(chat.sessionId),
+      ])
+    })()
+  }, [chat.loading, chat.sessionId, consoleData.refreshSessions, consoleData.refreshUsageStats])
 
   useEffect(() => {
     if (view !== 'agent-chat') return
@@ -1598,11 +1770,55 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
   }
 
   const changeSkillGenerateVendor = (targetVendorId: string) => {
-    const nextVendor = consoleData.modelConfig.vendors.find(item => item.vendor_id === targetVendorId) || null
+    const nextVendor = modelSelectionVendors.find(item => item.vendor_id === targetVendorId) || null
     setSkillGenerateDraft({
       model_vendor_id: targetVendorId,
-      model_id: nextVendor?.models.find(item => item.enabled)?.model_id || nextVendor?.models[0]?.model_id || '',
+      model_id: getPreferredVendorModels(nextVendor)[0]?.model_id || '',
     })
+  }
+
+  const syncAgentPromptSlash = (value: string, caretPosition: number | null | undefined) => {
+    if (caretPosition == null) {
+      setAgentPromptSlash(null)
+      return
+    }
+    setAgentPromptSlash(findPromptVariableSlashToken(value, caretPosition))
+  }
+
+  const updateAgentPersonaPrompt = (value: string, caretPosition: number | null | undefined) => {
+    setAgentForm(prev => ({ ...prev, persona_prompt: value }))
+    syncAgentPromptSlash(value, caretPosition)
+  }
+
+  const insertAgentPromptVariable = (variableKey: string) => {
+    const current = agentPromptSlash
+    const normalizedKey = String(variableKey || '').trim()
+    if (!current || !normalizedKey) return
+    const token = `{{${normalizedKey}}}`
+    setAgentForm(prev => ({
+      ...prev,
+      persona_prompt: `${prev.persona_prompt.slice(0, current.start)}${token}${prev.persona_prompt.slice(current.end)}`,
+    }))
+    setAgentPromptSlash(null)
+    window.requestAnimationFrame(() => {
+      const input = agentPromptInputRef.current
+      if (!input) return
+      const nextCursor = current.start + token.length
+      input.focus()
+      input.setSelectionRange(nextCursor, nextCursor)
+    })
+  }
+
+  const handleAgentPersonaPromptKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (!agentPromptSlash || !promptVariableOptions.length) return
+    if (event.key === 'Escape') {
+      setAgentPromptSlash(null)
+      return
+    }
+    if (event.key === 'Enter' || event.key === 'Tab') {
+      event.preventDefault()
+      insertAgentPromptVariable(promptVariableOptions[0].key)
+    }
   }
 
   const isToolServerExpanded = (targetServerName: string) => {
@@ -1708,6 +1924,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
           enabled: modelCreateDraft.enabled,
           input_cost_per_mtokens: modelCreateDraft.input_cost_per_mtokens,
           output_cost_per_mtokens: modelCreateDraft.output_cost_per_mtokens,
+          max_context_tokens: modelCreateDraft.max_context_tokens,
         },
       ],
     })
@@ -2313,9 +2530,12 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
               return (
                 <div key={item.agent_id} className={cx('rounded-[26px] border p-5 transition', active ? 'border-emerald-200 bg-emerald-50/40 shadow-[0_18px_48px_rgba(16,185,129,0.10)]' : 'border-slate-200 bg-[#fbfefd]')}>
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="truncate text-lg font-semibold text-slate-900">{item.name || item.agent_id}</div>
-                      <div className="mt-1 truncate text-xs text-slate-500">{item.agent_id}</div>
+                    <div className="flex min-w-0 items-start gap-3">
+                      <AgentAvatar />
+                      <div className="min-w-0">
+                        <div className="truncate text-lg font-semibold text-slate-900">{item.name || item.agent_id}</div>
+                        <div className="mt-1 truncate text-xs text-slate-500">{item.agent_id}</div>
+                      </div>
                     </div>
                     <div className="flex flex-wrap justify-end gap-2">
                       {item.is_default && <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] text-emerald-700">默认</span>}
@@ -2738,74 +2958,191 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
     </div>
   )
 
-  const renderAgentChat = () => (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-      <ChatWorkspace
-        agent={activeAgentForChat ? { agent_id: activeAgentForChat.agent_id, name: activeAgentForChat.name, description: activeAgentForChat.description, agent_variables: activeAgentForChat.agent_variables || [] } : null}
-        chat={chat}
-        modelReady={consoleData.modelConfig.has_api_key}
-        quickActions={profile.ui.quick_actions}
-        onBack={() => setView('agents')}
-      />
-      <div className="space-y-5">
-        <Surface className="p-4">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <div>
-              <div className="text-sm font-semibold text-slate-900">历史会话</div>
-              <div className="mt-1 text-xs text-slate-500">{activeAgentSessionOwner ? '这里只展示当前智能体的历史会话。' : '请先从智能体详情进入对话，再在这里查看该智能体的历史记录。'}</div>
-            </div>
-            <button onClick={() => void consoleData.refreshSessions()} className="rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">刷新</button>
-          </div>
-          <div className="space-y-2">
-            {activeAgentSessions.map(item => (
-              <button key={item.id} onClick={() => { void consoleData.selectSession(item.id) }} className={cx('w-full rounded-2xl border px-4 py-3 text-left transition', consoleData.selectedSessionId === item.id ? 'border-emerald-200 bg-emerald-50/70' : 'border-slate-200 bg-[#fbfefd] hover:border-emerald-100 hover:bg-emerald-50/40')}>
-                <div className="text-sm font-medium text-slate-900">{item.title || item.id}</div>
-                <div className="mt-1 text-xs text-slate-500">{formatTime(item.updated_at || item.created_at)}</div>
-              </button>
-            ))}
-            {!activeAgentSessions.length && (
-              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-5 text-sm text-slate-500">
-                {activeAgentSessionOwner ? 'No session history for the current agent yet.' : 'Select an agent and enter chat first. Its session history will appear here.'}
-              </div>
-            )}
-          </div>
-        </Surface>
+  const renderSessionMessageCard = (message: SessionMessageRecord, compact = false) => {
+    const cardMap = new Map<string, Record<string, any>>()
+    for (const part of message.parts || []) {
+      const cardId = String(part.metadata?.card_id || '').trim()
+      const cardPayload = part.metadata?.card
+      if (!cardId || !isRecord(cardPayload)) continue
+      cardMap.set(cardId, cardPayload)
+    }
+    const usedCardIds = new Set<string>()
+    const contentBlocks: ReactNode[] = []
+    const renderInlineCards = (text: string, keyPrefix: string, tone: 'default' | 'tool' = 'default') => {
+      const source = String(text || '')
+      const tokenRe = /\[\[CARD:([^\]]+)\]\]/g
+      let lastIndex = 0
+      let match: RegExpExecArray | null
+      let chunkIndex = 0
+      while ((match = tokenRe.exec(source)) !== null) {
+        const textChunk = source.slice(lastIndex, match.index).trim()
+        if (textChunk) {
+          contentBlocks.push(
+            <div key={`${keyPrefix}-text-${chunkIndex}`} className={cx('rounded-2xl px-4 py-3 text-sm leading-6 whitespace-pre-wrap break-words', tone === 'tool' ? 'border border-slate-200 bg-[#f8fbfa] text-slate-700' : 'text-slate-700')}>
+              {textChunk}
+            </div>,
+          )
+        }
+        const cardId = String(match[1] || '').trim()
+        const card = cardMap.get(cardId)
+        if (card) {
+          usedCardIds.add(cardId)
+          contentBlocks.push(<CardRenderer key={`${keyPrefix}-card-${cardId}`} card={card} onAction={chat.send} />)
+        }
+        lastIndex = tokenRe.lastIndex
+        chunkIndex += 1
+      }
+      const tail = source.slice(lastIndex).trim()
+      if (tail) {
+        contentBlocks.push(
+          <div key={`${keyPrefix}-tail`} className={cx('rounded-2xl px-4 py-3 text-sm leading-6 whitespace-pre-wrap break-words', tone === 'tool' ? 'border border-slate-200 bg-[#f8fbfa] text-slate-700' : 'text-slate-700')}>
+            {tail}
+          </div>,
+        )
+      }
+    }
 
-        <Surface className="p-4">
-          <div className="mb-4">
-            <div className="text-sm font-semibold text-slate-900">{selectedActiveAgentSession?.title || '会话消息'}</div>
-            <div className="mt-1 text-xs text-slate-500">{selectedActiveAgentSession ? `${selectedActiveAgentSession.agent_id || 'default'} · ${formatTime(selectedActiveAgentSession.updated_at || selectedActiveAgentSession.created_at)}` : 'Select a session on the left to inspect its messages.'}</div>
-          </div>
-          <div className="max-h-[52vh] space-y-3 overflow-auto pr-1">
-            {consoleData.sessionMessagesLoading && (
-              <div className="rounded-2xl border border-slate-200 px-4 py-5 text-sm text-slate-500">正在读取会话消息…</div>
-            )}
-            {!consoleData.sessionMessagesLoading && !selectedActiveAgentSession && (
-              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-5 text-sm text-slate-500">请选择一条当前智能体的会话记录。</div>
-            )}
-            {!consoleData.sessionMessagesLoading && selectedActiveAgentSession && !consoleData.sessionMessages.length && (
-              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-5 text-sm text-slate-500">该会话暂无可展示的消息。</div>
-            )}
-            {!consoleData.sessionMessagesLoading && selectedActiveAgentSession && consoleData.sessionMessages.map(item => (
-              <div key={item.id} className="rounded-2xl border border-slate-200 bg-[#fbfefd] p-4">
-                <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
-                  <span>{item.role} · {item.agent || 'default'} · {item.model || '--'}</span>
-                  <span>{formatTime(item.created_at)}</span>
-                </div>
-                <div className="mt-3 space-y-2">
-                  {item.parts.map((part, index) => (
-                    <div key={`${item.id}-${index}`} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-emerald-600">{part.type}</div>
-                      <div className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">{part.content || '--'}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </Surface>
+    for (const [partIndex, part] of (message.parts || []).entries()) {
+      const partKey = `${message.id}-${partIndex}`
+      if (part.type === 'card') continue
+      if (part.type === 'tool_call') {
+        let preview = String(part.content || '').trim()
+        try {
+          preview = formatJson(JSON.parse(preview || '{}'))
+        } catch {}
+        contentBlocks.push(
+          <div key={partKey} className="rounded-2xl border border-slate-200 bg-[#f8fbfa] px-4 py-3">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-emerald-600">工具调用</div>
+            <pre className="mt-2 whitespace-pre-wrap break-all text-xs leading-6 text-slate-600">{preview || '--'}</pre>
+          </div>,
+        )
+        continue
+      }
+      if (part.type === 'tool_result') {
+        contentBlocks.push(
+          <div key={`${partKey}-label`} className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+            工具结果
+          </div>,
+        )
+        renderInlineCards(String(part.content || ''), partKey, 'tool')
+        continue
+      }
+      if (part.type === 'thinking') {
+        contentBlocks.push(
+          <div key={partKey} className="rounded-2xl border border-slate-200 bg-[#f8fbfa] px-4 py-3 text-sm leading-6 whitespace-pre-wrap break-words text-slate-600">
+            {part.content || '--'}
+          </div>,
+        )
+        continue
+      }
+      renderInlineCards(String(part.content || ''), partKey)
+    }
+
+    for (const [cardId, card] of cardMap.entries()) {
+      if (usedCardIds.has(cardId)) continue
+      contentBlocks.push(<CardRenderer key={`${message.id}-extra-card-${cardId}`} card={card} onAction={chat.send} />)
+    }
+
+    return (
+      <div key={message.id} className={cx('rounded-[24px] border border-slate-200 bg-white', compact ? 'p-4' : 'p-5')}>
+        <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
+          <span>{message.role} · {message.agent || 'default'} · {message.model || '--'}</span>
+          <span>{formatTime(message.created_at)}</span>
+        </div>
+        <div className={cx('mt-3 space-y-3', compact ? 'max-h-[46vh] overflow-auto pr-1' : 'max-h-[72vh] overflow-auto pr-1')}>
+          {contentBlocks.length ? contentBlocks : <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-4 text-sm text-slate-400">该消息暂无可展示内容。</div>}
+        </div>
       </div>
-    </div>
+    )
+  }
+
+  const renderAgentChat = () => (
+    <>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <ChatWorkspace
+          agent={activeAgentForChat ? { agent_id: activeAgentForChat.agent_id, name: activeAgentForChat.name, description: activeAgentForChat.description, agent_variables: activeAgentForChat.agent_variables || [] } : null}
+          chat={chat}
+          modelReady={consoleData.modelConfig.has_api_key}
+          quickActions={profile.ui.quick_actions}
+          onBack={() => setView('agents')}
+        />
+        <div className="space-y-5">
+          <Surface className="p-4">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">历史会话</div>
+                <div className="mt-1 text-xs text-slate-500">{activeAgentSessionOwner ? '这里只展示当前智能体的历史会话。' : '请先从智能体详情进入对话，再在这里查看该智能体的历史记录。'}</div>
+              </div>
+              <button onClick={() => void consoleData.refreshSessions()} className="rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">刷新</button>
+            </div>
+            <div className="mb-3">
+              <Input value={agentSessionSearch} onChange={e => setAgentSessionSearch(e.target.value)} placeholder="搜索会话标题或 ID" />
+            </div>
+            <div className="space-y-2">
+              {filteredActiveAgentSessions.map(item => (
+                <button key={item.id} onClick={() => { void consoleData.selectSession(item.id) }} className={cx('w-full rounded-2xl border px-4 py-3 text-left transition', consoleData.selectedSessionId === item.id ? 'border-emerald-200 bg-emerald-50/70' : 'border-slate-200 bg-[#fbfefd] hover:border-emerald-100 hover:bg-emerald-50/40')}>
+                  <div className="text-sm font-medium text-slate-900">{item.title || item.id}</div>
+                  <div className="mt-1 text-xs text-slate-500">{formatTime(item.updated_at || item.created_at)}</div>
+                </button>
+              ))}
+              {!filteredActiveAgentSessions.length && (
+                <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-5 text-sm text-slate-500">
+                  {activeAgentSessionOwner ? '当前筛选下没有会话记录。' : '请先从智能体详情进入对话，再在这里查看该智能体的历史记录。'}
+                </div>
+              )}
+            </div>
+          </Surface>
+
+          <Surface className="p-4">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">{selectedActiveAgentSession?.title || '会话消息'}</div>
+                <div className="mt-1 text-xs text-slate-500">{selectedActiveAgentSession ? `${selectedActiveAgentSession.agent_id || 'default'} · ${formatTime(selectedActiveAgentSession.updated_at || selectedActiveAgentSession.created_at)}` : '请选择一条当前智能体的会话记录。'}</div>
+              </div>
+              <button onClick={() => setAgentSessionViewerOpen(true)} disabled={!selectedActiveAgentSession} className="rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600 disabled:opacity-40">大窗查看</button>
+            </div>
+            {selectedActiveAgentSession && (
+              <div className="mb-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_160px]">
+                <Input value={agentSessionMessageSearch} onChange={e => setAgentSessionMessageSearch(e.target.value)} placeholder="搜索消息内容 / 工具 / 模型" />
+                <Select value={agentSessionRoleFilter} onChange={e => setAgentSessionRoleFilter(e.target.value)}>
+                  <option value="all">全部角色</option>
+                  {sessionMessageRoleOptions.map(role => <option key={role} value={role}>{role}</option>)}
+                </Select>
+              </div>
+            )}
+            <div className="max-h-[52vh] space-y-3 overflow-auto pr-1">
+              {consoleData.sessionMessagesLoading && (
+                <div className="rounded-2xl border border-slate-200 px-4 py-5 text-sm text-slate-500">正在读取会话消息…</div>
+              )}
+              {!consoleData.sessionMessagesLoading && !selectedActiveAgentSession && (
+                <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-5 text-sm text-slate-500">请选择一条当前智能体的会话记录。</div>
+              )}
+              {!consoleData.sessionMessagesLoading && selectedActiveAgentSession && !filteredSelectedSessionMessages.length && (
+                <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-5 text-sm text-slate-500">当前筛选条件下没有可展示的消息。</div>
+              )}
+              {!consoleData.sessionMessagesLoading && selectedActiveAgentSession && filteredSelectedSessionMessages.map(item => renderSessionMessageCard(item, true))}
+            </div>
+          </Surface>
+        </div>
+      </div>
+
+      <Modal open={agentSessionViewerOpen && Boolean(selectedActiveAgentSession)} onClose={() => setAgentSessionViewerOpen(false)} title={selectedActiveAgentSession?.title || '会话详情'} description="支持搜索和角色筛选，便于复盘整段对话。" widthClass="max-w-6xl">
+        <div className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
+            <Input value={agentSessionMessageSearch} onChange={e => setAgentSessionMessageSearch(e.target.value)} placeholder="搜索消息内容 / 工具 / 模型" />
+            <Select value={agentSessionRoleFilter} onChange={e => setAgentSessionRoleFilter(e.target.value)}>
+              <option value="all">全部角色</option>
+              {sessionMessageRoleOptions.map(role => <option key={role} value={role}>{role}</option>)}
+            </Select>
+          </div>
+          <div className="space-y-4">
+            {consoleData.sessionMessagesLoading && <div className="rounded-2xl border border-slate-200 px-4 py-5 text-sm text-slate-500">正在读取会话消息…</div>}
+            {!consoleData.sessionMessagesLoading && !filteredSelectedSessionMessages.length && <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-5 text-sm text-slate-500">当前筛选条件下没有可展示的消息。</div>}
+            {!consoleData.sessionMessagesLoading && filteredSelectedSessionMessages.map(item => renderSessionMessageCard(item, false))}
+          </div>
+        </div>
+      </Modal>
+    </>
   )
 
   const modelCreateOwner = modelDraft.vendors.find(item => item.vendor_id === modelCreateVendorId) || selectedVendor
@@ -2908,6 +3245,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
               <Field label="模型 ID"><Input value={modelCreateDraft.model_id} onChange={e => setModelCreateDraft(prev => ({ ...prev, model_id: e.target.value }))} placeholder="例如 gpt-4o-mini" /></Field>
               <Field label="显示名"><Input value={modelCreateDraft.display_name} onChange={e => setModelCreateDraft(prev => ({ ...prev, display_name: e.target.value }))} placeholder="控制台显示名称" /></Field>
               <div className="md:col-span-2"><Field label="实际模型名"><Input value={modelCreateDraft.chat_model} onChange={e => setModelCreateDraft(prev => ({ ...prev, chat_model: e.target.value }))} placeholder="实际请求模型名" /></Field></div>
+              <Field label="最大上下文（tokens，可选）"><Input type="number" step="1" value={modelCreateDraft.max_context_tokens ?? ''} onChange={e => setModelCreateDraft(prev => ({ ...prev, max_context_tokens: parseNullableIntegerInput(e.target.value) }))} placeholder="例如 128000" /></Field>
               <Field label="Input 单价（元 / M tokens，可选）"><Input type="number" step="0.0001" value={modelCreateDraft.input_cost_per_mtokens ?? ''} onChange={e => setModelCreateDraft(prev => ({ ...prev, input_cost_per_mtokens: parseNullableNumberInput(e.target.value) }))} placeholder="例如 2.5000" /></Field>
               <Field label="Output 单价（元 / M tokens，可选）"><Input type="number" step="0.0001" value={modelCreateDraft.output_cost_per_mtokens ?? ''} onChange={e => setModelCreateDraft(prev => ({ ...prev, output_cost_per_mtokens: parseNullableNumberInput(e.target.value) }))} placeholder="例如 8.0000" /></Field>
             </div>
@@ -2987,6 +3325,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
                                 <span>{formatCompactMetric(modelUsage?.total_calls || 0)} 次调用</span>
                                 <span>{formatTokenMetric(modelUsage?.total_tokens || 0)} Token</span>
                                 <span>{formatCurrency(modelUsage?.estimated_cost || 0)}</span>
+                                {model.max_context_tokens ? <span>{formatInteger(model.max_context_tokens)} 上下文</span> : null}
                               </div>
                             </div>
                             <button onClick={() => void runAction(async () => { await deleteVendorModel(model.model_id) }, '模型已删除')} className="inline-flex items-center gap-1 rounded-xl border border-rose-200 px-3 py-2 text-xs text-rose-600 transition hover:bg-rose-50"><Trash2 size={12} />删除</button>
@@ -2994,6 +3333,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
                           <div className="grid gap-3">
                             <Field label="显示名"><Input value={model.display_name} onChange={e => updateVendorModel(selectedVendor.vendor_id, model.model_id, { display_name: e.target.value })} /></Field>
                             <Field label="实际模型名"><Input value={model.chat_model} onChange={e => updateVendorModel(selectedVendor.vendor_id, model.model_id, { chat_model: e.target.value })} /></Field>
+                            <Field label="最大上下文（tokens，可选）"><Input type="number" step="1" value={model.max_context_tokens ?? ''} onChange={e => updateVendorModel(selectedVendor.vendor_id, model.model_id, { max_context_tokens: parseNullableIntegerInput(e.target.value) })} placeholder="例如 128000" /></Field>
                             <Field label="Input 单价（元 / M tokens，可选）"><Input type="number" step="0.0001" value={model.input_cost_per_mtokens ?? ''} onChange={e => updateVendorModel(selectedVendor.vendor_id, model.model_id, { input_cost_per_mtokens: parseNullableNumberInput(e.target.value) })} placeholder="例如 2.5000" /></Field>
                             <Field label="Output 单价（元 / M tokens，可选）"><Input type="number" step="0.0001" value={model.output_cost_per_mtokens ?? ''} onChange={e => updateVendorModel(selectedVendor.vendor_id, model.model_id, { output_cost_per_mtokens: parseNullableNumberInput(e.target.value) })} placeholder="例如 8.0000" /></Field>
                           </div>
@@ -3046,21 +3386,49 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
                 <Field label="智能体 ID"><Input value={agentForm.agent_id} onChange={e => setAgentForm(prev => ({ ...prev, agent_id: e.target.value }))} /></Field>
                 <Field label="名称"><Input value={agentForm.name} onChange={e => setAgentForm(prev => ({ ...prev, name: e.target.value }))} /></Field>
                 <div className="md:col-span-2"><Field label="描述"><Area rows={3} value={agentForm.description} onChange={e => setAgentForm(prev => ({ ...prev, description: e.target.value }))} /></Field></div>
-                <div className="md:col-span-2"><Field label="角色 Prompt"><Area rows={6} value={agentForm.persona_prompt} onChange={e => setAgentForm(prev => ({ ...prev, persona_prompt: e.target.value }))} /></Field></div>
+                <div className="md:col-span-2">
+                  <Field label="角色 Prompt">
+                    <div className="space-y-2">
+                      <Area
+                        rows={6}
+                        inputRef={agentPromptInputRef}
+                        value={agentForm.persona_prompt}
+                        onChange={e => updateAgentPersonaPrompt(e.target.value, e.target.selectionStart)}
+                        onSelect={e => syncAgentPromptSlash(e.currentTarget.value, e.currentTarget.selectionStart)}
+                        onKeyDown={handleAgentPersonaPromptKeyDown}
+                      />
+                      {agentPromptSlash && (
+                        <div className="rounded-2xl border border-slate-200 bg-[#fbfefd] p-3">
+                          <div className="mb-2 text-xs text-slate-500">输入 <code>/</code> 可插入变量，占位符会保存为 <code>{'{{变量Key}}'}</code>。</div>
+                          <div className="flex flex-wrap gap-2">
+                            {promptVariableOptions.map(item => (
+                              <button key={`prompt-var-${item.key}`} type="button" onClick={() => insertAgentPromptVariable(item.key)} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 transition hover:border-emerald-200 hover:text-emerald-600">
+                                <span>{item.label || item.key}</span>
+                                <span className="text-slate-400">/{item.key}</span>
+                                {item.inject_to_prompt && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] text-emerald-700">已注入</span>}
+                              </button>
+                            ))}
+                            {!promptVariableOptions.length && <span className="text-xs text-slate-400">没有匹配的变量</span>}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </Field>
+                </div>
                 <Field label="厂商">
                   <Select value={agentForm.model_vendor_id} onChange={e => {
                     const nextVendorId = e.target.value
-                    const nextVendor = consoleData.modelConfig.vendors.find(item => item.vendor_id === nextVendorId)
-                    setAgentForm(prev => ({ ...prev, model_vendor_id: nextVendorId, model_id: nextVendor?.models[0]?.model_id || '' }))
+                    const nextVendor = modelSelectionVendors.find(item => item.vendor_id === nextVendorId)
+                    setAgentForm(prev => ({ ...prev, model_vendor_id: nextVendorId, model_id: getPreferredVendorModels(nextVendor)[0]?.model_id || '' }))
                   }}>
                     <option value="">未选择</option>
-                    {consoleData.modelConfig.vendors.map(item => <option key={item.vendor_id} value={item.vendor_id}>{item.display_name || item.vendor_id}</option>)}
+                    {modelSelectionVendors.map(item => <option key={item.vendor_id} value={item.vendor_id}>{item.display_name || item.vendor_id}</option>)}
                   </Select>
                 </Field>
                 <Field label="模型">
                   <Select value={agentForm.model_id} onChange={e => setAgentForm(prev => ({ ...prev, model_id: e.target.value }))}>
                     <option value="">未选择</option>
-                    {(selectedAgentVendor?.models || []).map(item => <option key={item.model_id} value={item.model_id}>{item.display_name || item.model_id}</option>)}
+                    {selectedAgentModels.map(item => <option key={item.model_id} value={item.model_id}>{item.display_name || item.model_id}</option>)}
                   </Select>
                 </Field>
               </div>
@@ -3099,7 +3467,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
                   </div>
                   <div className="space-y-3">
                     {agentForm.agent_variables.map((item, index) => (
-                      <div key={`${item.key || 'var'}-${index}`} className="rounded-2xl border border-slate-200 bg-[#fbfefd] p-4">
+                      <div key={`agent-variable-${index}`} className="rounded-2xl border border-slate-200 bg-[#fbfefd] p-4">
                         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                           <Field label="变量 Key"><Input value={item.key} onChange={e => updateAgentVariable(index, { key: e.target.value })} placeholder="例如 user_id" /></Field>
                           <Field label="显示名"><Input value={item.label} onChange={e => updateAgentVariable(index, { label: e.target.value })} placeholder="例如 用户 ID" /></Field>
@@ -3131,7 +3499,7 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
                       const argOptions = getToolInputArgNames(targetTool)
                       const hasArgOptions = argOptions.length > 0
                       return (
-                        <div key={`${item.tool_name || 'binding'}-${index}`} className="rounded-2xl border border-slate-200 bg-[#fbfefd] p-4">
+                        <div key={`agent-binding-${index}`} className="rounded-2xl border border-slate-200 bg-[#fbfefd] p-4">
                           <div className="grid gap-4 md:grid-cols-3">
                             <Field label="工具">
                               <Select value={item.tool_name} onChange={e => updateAgentToolBinding(index, { tool_name: e.target.value, arg_name: '' })}>
@@ -3292,9 +3660,9 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="text-sm text-slate-500">技能摘要会注入系统提示词，正文按需由平台加载给模型。</div>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => void runAction(async () => { const saved = await consoleData.saveSkill(skillFormToPayload(skillForm)); setSkillName(saved.skill_name); setSkillEditorOpen(false) }, '技能已保存')} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600"><Save size={14} />保存</button>
+                  <button onClick={() => void runAction(async () => { const saved = await consoleData.saveSkill(skillFormToPayload(skillForm), skillForm.original_skill_name); setSkillName(saved.skill_name); setSkillEditorOpen(false) }, '技能已保存')} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600"><Save size={14} />保存</button>
                   <button onClick={() => void runAction(async () => {
-                    const targetName = skillForm.skill_name || selectedSkill?.skill_name || ''
+                    const targetName = skillForm.original_skill_name || skillForm.skill_name || selectedSkill?.skill_name || ''
                     await consoleData.deleteSkill(targetName)
                     setSkillName(skills.find(item => item.skill_name !== targetName)?.skill_name || '')
                     setSkillEditorOpen(false)
@@ -3329,12 +3697,12 @@ export default function PlatformWorkbenchShell({ chat, profile, info, error }: P
                 <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                   <Field label="生成厂商">
                     <Select value={skillGenerateDraft.model_vendor_id} onChange={e => changeSkillGenerateVendor(e.target.value)}>
-                      {consoleData.modelConfig.vendors.map(item => <option key={item.vendor_id} value={item.vendor_id}>{item.display_name || item.vendor_id}</option>)}
+                      {modelSelectionVendors.map(item => <option key={item.vendor_id} value={item.vendor_id}>{item.display_name || item.vendor_id}</option>)}
                     </Select>
                   </Field>
                   <Field label="生成模型">
                     <Select value={skillGenerateDraft.model_id} onChange={e => setSkillGenerateDraft(prev => ({ ...prev, model_id: e.target.value }))}>
-                      {(skillGenerateVendor?.models || []).map(item => <option key={item.model_id} value={item.model_id}>{item.display_name || item.model_id}</option>)}
+                      {skillGenerateModels.map(item => <option key={item.model_id} value={item.model_id}>{item.display_name || item.model_id}</option>)}
                     </Select>
                   </Field>
                 </div>

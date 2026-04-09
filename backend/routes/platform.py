@@ -302,15 +302,20 @@ async def platform_skills(include_disabled: bool = False):
 
 @router.post("/skills")
 async def create_skill(payload: PlatformSkillRecord, db: AsyncSession = Depends(get_db)):
-    record = await upsert_skill_record(db, payload)
-    return record.model_dump(by_alias=True)
+    try:
+        record = await upsert_skill_record(db, payload)
+        return record.model_dump(by_alias=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.put("/skills/{skill_name}")
 async def update_skill(skill_name: str, payload: PlatformSkillRecord, db: AsyncSession = Depends(get_db)):
-    data = payload.model_copy(update={"skill_name": skill_name})
-    record = await upsert_skill_record(db, data)
-    return record.model_dump(by_alias=True)
+    try:
+        record = await upsert_skill_record(db, payload, previous_skill_name=skill_name)
+        return record.model_dump(by_alias=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.delete("/skills/{skill_name}")

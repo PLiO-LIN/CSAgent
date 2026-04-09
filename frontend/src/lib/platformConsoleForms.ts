@@ -3,6 +3,7 @@ import type { FrameworkInfo } from '../hooks/useFrameworkProfile'
 export type AgentRecord = FrameworkInfo['agents'][number]
 export type ToolRecord = FrameworkInfo['tools'][number]
 export type SkillRecord = FrameworkInfo['skills'][number]
+export type CardCollectionRecord = FrameworkInfo['card_collections'][number]
 export type CardTemplateRecord = FrameworkInfo['card_templates'][number]
 
 export interface AgentVariableFormField {
@@ -62,6 +63,7 @@ export interface ToolForm {
 }
 
 export interface SkillForm {
+  original_skill_name: string
   skill_name: string
   display_name: string
   summary: string
@@ -79,6 +81,7 @@ export interface SkillForm {
 
 export interface CardTemplateForm {
   template_id: string
+  collection_id: string
   display_name: string
   summary: string
   enabled: boolean
@@ -88,6 +91,14 @@ export interface CardTemplateForm {
   ui_schema_text: string
   action_schema_text: string
   sample_payload_text: string
+  metadata_text: string
+}
+
+export interface CardCollectionForm {
+  collection_id: string
+  display_name: string
+  summary: string
+  enabled: boolean
   metadata_text: string
 }
 
@@ -102,6 +113,7 @@ export function formatJson(value: unknown) {
 export function createCardTemplateForm(record?: Partial<CardTemplateRecord>): CardTemplateForm {
   return {
     template_id: String(record?.template_id || ''),
+    collection_id: String(record?.collection_id || 'default'),
     display_name: String(record?.display_name || ''),
     summary: String(record?.summary || ''),
     enabled: Boolean(record?.enabled ?? true),
@@ -111,6 +123,16 @@ export function createCardTemplateForm(record?: Partial<CardTemplateRecord>): Ca
     ui_schema_text: formatJson(record?.ui_schema || {}),
     action_schema_text: formatJson(record?.action_schema || {}),
     sample_payload_text: formatJson(record?.sample_payload || {}),
+    metadata_text: formatJson(record?.metadata || {}),
+  }
+}
+
+export function createCardCollectionForm(record?: Partial<CardCollectionRecord>): CardCollectionForm {
+  return {
+    collection_id: String(record?.collection_id || ''),
+    display_name: String(record?.display_name || ''),
+    summary: String(record?.summary || ''),
+    enabled: Boolean(record?.enabled ?? true),
     metadata_text: formatJson(record?.metadata || {}),
   }
 }
@@ -221,6 +243,7 @@ export function agentFormToPayload(form: AgentForm): AgentRecord {
 export function cardTemplateFormToPayload(form: CardTemplateForm): CardTemplateRecord {
   return {
     template_id: form.template_id.trim(),
+    collection_id: form.collection_id.trim() || 'default',
     display_name: form.display_name.trim() || form.template_id.trim(),
     summary: form.summary.trim(),
     enabled: form.enabled,
@@ -230,6 +253,16 @@ export function cardTemplateFormToPayload(form: CardTemplateForm): CardTemplateR
     ui_schema: parseJsonText(form.ui_schema_text, {}, 'UI Schema'),
     action_schema: parseJsonText(form.action_schema_text, {}, '动作 Schema'),
     sample_payload: parseJsonText(form.sample_payload_text, {}, '样例 Payload'),
+    metadata: parseJsonText(form.metadata_text, {}, '附加信息'),
+  }
+}
+
+export function cardCollectionFormToPayload(form: CardCollectionForm): CardCollectionRecord {
+  return {
+    collection_id: form.collection_id.trim(),
+    display_name: form.display_name.trim() || form.collection_id.trim(),
+    summary: form.summary.trim(),
+    enabled: form.enabled,
     metadata: parseJsonText(form.metadata_text, {}, '附加信息'),
   }
 }
@@ -276,6 +309,7 @@ export function toolFormToPayload(form: ToolForm): ToolRecord {
 
 export function createSkillForm(record?: Partial<SkillRecord>): SkillForm {
   return {
+    original_skill_name: String(record?.skill_name || ''),
     skill_name: String(record?.skill_name || ''),
     display_name: String(record?.display_name || ''),
     summary: String(record?.summary || ''),

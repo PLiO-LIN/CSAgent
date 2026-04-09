@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routes.meta import router as framework_router
+from routes.published_agent import router as published_agent_router
 from db.engine import init_db, Session
 from mcp_runtime import ensure_mcp_tools_loaded, shutdown_mcp_runtime
 from platform_registry import bootstrap_platform_registry
@@ -44,6 +45,7 @@ app.include_router(chat_ws_router)
 app.include_router(chat_rest_router)
 app.include_router(framework_router)
 app.include_router(platform_router)
+app.include_router(published_agent_router)
 
 
 @app.get("/health")

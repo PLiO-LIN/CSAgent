@@ -207,11 +207,24 @@ export function useChat() {
 
       case 'tool_result': {
         const m = ensure()
+        const rawText = String(ev.text || '')
+        const inlineCardTokens = rawText.match(/\[\[CARD:[^\]]+\]\]/g) || []
+        const cleanedOutput = rawText
+          .replace(/\n?\s*\[\[CARD:[^\]]+\]\]\s*/g, '\n')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim()
         const t = m.tools.find(t => t.id === ev.tool_call_id)
           || m.tools.find(t => t.name === ev.tool && (t.status === 'calling' || t.status === 'executing'))
         if (t) {
           t.status = ev.error ? 'error' : 'done'
-          t.output = ev.text || ''
+          t.output = cleanedOutput
+        }
+        if (inlineCardTokens.length > 0) {
+          const missingTokens = inlineCardTokens.filter(token => !m.content.includes(token))
+          if (missingTokens.length) {
+            const joiner = m.content && !m.content.endsWith('\n') ? '\n\n' : ''
+            m.content += `${joiner}${missingTokens.join('\n\n')}`
+          }
         }
         flush()
         break

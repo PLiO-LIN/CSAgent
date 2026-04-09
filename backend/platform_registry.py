@@ -918,12 +918,21 @@ async def upsert_tool_record(db: AsyncSession, payload: PlatformToolRecord) -> P
     return _tool_cache[payload.tool_name]
 
 
-async def upsert_skill_record(db: AsyncSession, payload: PlatformSkillRecord) -> PlatformSkillRecord:
+async def upsert_skill_record(db: AsyncSession, payload: PlatformSkillRecord, previous_skill_name: str = "") -> PlatformSkillRecord:
     now = time.time()
-    model = await db.get(PlatformSkillModel, payload.skill_name)
+    target_skill_name = str(payload.skill_name or "").strip()
+    previous_key = str(previous_skill_name or "").strip() or target_skill_name
+    if not target_skill_name:
+        raise ValueError("skill_name is required")
+    model = await db.get(PlatformSkillModel, previous_key)
+    if previous_key != target_skill_name:
+        conflict = await db.get(PlatformSkillModel, target_skill_name)
+        if conflict is not None and conflict is not model:
+            raise ValueError(f"Skill already exists: {target_skill_name}")
     if model is None:
-        model = PlatformSkillModel(skill_name=payload.skill_name, created_at=now)
-    model.display_name = payload.display_name or payload.skill_name
+        model = PlatformSkillModel(skill_name=target_skill_name, created_at=now)
+    model.skill_name = target_skill_name
+    model.display_name = payload.display_name or target_skill_name
     model.summary = payload.summary
     model.document_md = payload.document_md
     model.enabled = bool(payload.enabled)
@@ -937,9 +946,20 @@ async def upsert_skill_record(db: AsyncSession, payload: PlatformSkillRecord) ->
     model.metadata_ = dict(payload.metadata or {})
     model.updated_at = now
     db.add(model)
+    if previous_key and previous_key != target_skill_name:
+        agent_rows = await db.execute(select(PlatformAgentModel))
+        for agent in agent_rows.scalars().all():
+            next_skill_names = _dedupe_text_list([
+                target_skill_name if str(name or "").strip() == previous_key else str(name or "").strip()
+                for name in (agent.skill_names or [])
+            ])
+            if next_skill_names != list(agent.skill_names or []):
+                agent.skill_names = next_skill_names
+                agent.updated_at = now
+                db.add(agent)
     await db.commit()
     await refresh_registry_cache(db)
-    return _skill_cache[payload.skill_name]
+    return _skill_cache[target_skill_name]
 
 
 async def upsert_agent_record(db: AsyncSession, payload: PlatformAgentRecord) -> PlatformAgentRecord:
